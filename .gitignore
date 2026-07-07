@@ -1,0 +1,18 @@
+# Build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+
+# IDE
+.vs/
+*.user
+*.suo
+
+# Smoke-test / scratch
+.smoke/
+
+# Logs
+*.log

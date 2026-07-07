@@ -1,0 +1,30 @@
+<Project>
+
+  <!--
+    Git-based versioning for the whole solution, via MinVer.
+
+    The version is derived from Git tags on every build:
+      * On a commit tagged vX.Y.Z       -> exactly X.Y.Z.
+      * On any other commit             -> the next patch as a pre-release, with the number of
+                                           commits since the nearest tag as height
+                                           (e.g. 0.0.3-alpha.0.5). The .NET SDK then appends the
+                                           commit hash as build metadata, so the informational
+                                           version reads e.g. 0.0.3-alpha.0.5+74cab42…
+
+    So a tagged release commit carries a clean version, and every other build is identified by its
+    commit hash — surfaced in the tray menu's "About OneMore MCP…" item (see AboutForm) and in the
+    file's Product version.
+
+    Our tags carry a leading "v" (v0.0.1, v0.0.2, …), stripped via MinVerTagPrefix. Versioning runs
+    in every configuration (Debug included) so `dotnet run` and the About box always report the real
+    build. A source tree without a .git directory (e.g. an extracted zip) falls back to 0.0.0-alpha.0.
+  -->
+  <PropertyGroup>
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MinVer" Version="7.0.0" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

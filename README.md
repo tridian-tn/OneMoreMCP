@@ -253,16 +253,17 @@ There are two ways to change a page, with deliberately different safety models:
   tools return a clear "writes are disabled" error until you do.
 
 > [!WARNING]
-> **Writing to existing pages may not persist in all environments.** `append_to_page` and
-> `create_or_update_page` (overwrite) go through the OneMore CLI's `PutPage`, which wraps OneNote's
-> `UpdatePageContent`. In testing against **OneDrive/SharePoint-synced** notebooks, *creating* a new
-> page works, but *overwriting an existing* page reported success yet did not round-trip on a
-> subsequent read — the same behaviour occurs calling `OneMoreCli.exe PutPage` directly, so it is a
-> OneMore/OneNote/sync behaviour rather than this server. Two practical notes:
-> - The change may still apply in the **live OneNote UI** even when a fresh CLI read doesn't show it.
-> - It's worth verifying against a **local (non-synced) notebook**, and with OneNote open on the target.
+> **Content-writes currently don't persist — tracked upstream as [OneMore #2322][2322].** The
+> content-changing tools (`append_to_page`, `create_or_update_page`, `add_hashtag` /
+> `remove_hashtag`, `insert_toc`, `run_cleanup`) go through the OneMore CLI's `PutPage` /
+> `AddHashtag`, which wrap OneNote's `UpdatePageContent`. Those commands report success (exit 0) but
+> the change does not appear on a subsequent read. This reproduces calling `OneMoreCli.exe` directly
+> — so it's a OneMore/OneNote behaviour, **not this server** — and is independent of the notebook:
+> it fails identically on OneDrive-synced *and* local notebooks. Page *creation* and all reads
+> (`list_hierarchy`, `get_page`, `search`) work. The write tools are kept in place so they light up
+> automatically once the upstream issue is resolved.
 >
-> Reads (`list_hierarchy`, `get_page`, `search`) are verified working end to end.
+> [2322]: https://github.com/stevencohn/OneMore/issues/2322
 
 ## Concurrency note
 

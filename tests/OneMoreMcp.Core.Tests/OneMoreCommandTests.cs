@@ -40,6 +40,13 @@ public class OneMoreCommandTests
     }
 
     [Fact]
+    public void AddHashtag_includes_the_required_notebook()
+    {
+        var argv = OneMoreCommand.AddHashtag("#todo", notebook: "Work", section: "S").Build();
+        Assert.Equal(new[] { "AddHashtag", "--notebook", "Work", "--section", "S", "--tags", "#todo" }, argv);
+    }
+
+    [Fact]
     public void SearchHashtags_allTags_adds_the_switch()
     {
         Assert.Equal(

@@ -29,6 +29,10 @@ public sealed class OneMoreCliRunner : IOneMoreRunner
 {
     // Candidate install layouts, relative to a Program Files / LocalAppData root. The first is the
     // actual current layout; the second is what the OneMore CLI docs describe (kept for older/other builds).
+    // Upper bound on captured stdout+stderr (~16 MB of chars). A well-behaved command stays far under
+    // this; exceeding it means the CLI is looping (typically an interactive prompt for a missing arg).
+    private const long MaxCapturedChars = 16_000_000;
+
     private static readonly string[][] CandidateRelativePaths =
     {
         new[] { "River", "OneMoreAddIn", "OneMoreCli.exe" },
@@ -92,6 +96,7 @@ public sealed class OneMoreCliRunner : IOneMoreRunner
         var psi = new ProcessStartInfo(exe)
         {
             UseShellExecute = false,
+            RedirectStandardInput = true,   // closed immediately so a prompting CLI gets EOF, not our stdin
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true,
@@ -105,8 +110,23 @@ public sealed class OneMoreCliRunner : IOneMoreRunner
         using var process = new Process { StartInfo = psi };
         var stdout = new StringBuilder();
         var stderr = new StringBuilder();
-        process.OutputDataReceived += (_, e) => { if (e.Data is not null) stdout.AppendLine(e.Data); };
-        process.ErrorDataReceived += (_, e) => { if (e.Data is not null) stderr.AppendLine(e.Data); };
+        // Guard against a runaway CLI: when a required parameter is missing it drops into an
+        // interactive prompt and, with no console, re-prompts forever — emitting unbounded output.
+        // Cap what we capture and kill the process if it's exceeded.
+        var overflowed = false;
+        long captured = 0;
+        void Capture(StringBuilder sink, string? data)
+        {
+            if (data is null) return;
+            sink.AppendLine(data);
+            if (Interlocked.Add(ref captured, data.Length + 1) > MaxCapturedChars && !overflowed)
+            {
+                overflowed = true;
+                TryKill(process);
+            }
+        }
+        process.OutputDataReceived += (_, e) => Capture(stdout, e.Data);
+        process.ErrorDataReceived += (_, e) => Capture(stderr, e.Data);
 
         _log.LogInformation("Running OneMore CLI: {Command}", command.ToString());
 
@@ -119,6 +139,7 @@ public sealed class OneMoreCliRunner : IOneMoreRunner
             throw new CliException($"Could not start OneMore CLI: {ex.Message}", command.ToString(), stdErr: ex.Message);
         }
 
+        try { process.StandardInput.Close(); } catch { /* nothing to send; EOF the child's stdin */ }
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
@@ -136,6 +157,11 @@ public sealed class OneMoreCliRunner : IOneMoreRunner
                 : $"OneMore CLI call timed out after {timeout.TotalSeconds:0}s.";
             throw new CliException(reason, command.ToString(), stdErr: stderr.ToString());
         }
+
+        if (overflowed)
+            throw new CliException(
+                "OneMore CLI produced excessive output and was stopped — a required parameter is likely missing, " +
+                "causing the CLI to fall into an interactive prompt.", command.ToString(), stdErr: "output limit exceeded");
 
         // Ensure the async output/error pumps have flushed before reading the buffers.
         process.WaitForExit();

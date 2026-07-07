@@ -92,7 +92,7 @@ public class OneMoreToolsTests
     public async Task Add_hashtag_is_gated_by_writes()
     {
         var (tools, _) = Build(allowWrites: false);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => tools.AddHashtag("#todo"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => tools.AddHashtag("#todo", notebook: "N"));
     }
 
     // --- Test doubles ---

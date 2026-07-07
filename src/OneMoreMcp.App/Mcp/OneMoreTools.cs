@@ -125,24 +125,30 @@ public sealed class OneMoreTools
     }
 
     [McpServerTool(Name = "add_hashtag")]
-    [Description("Add one or more hashtags to the current page(s). Requires writes to be enabled.")]
+    [Description("Add one or more hashtags to pages in a notebook (optionally scoped to a section/page). Requires writes to be enabled.")]
     public async Task<string> AddHashtag(
         [Description("Space-separated tags, e.g. '#todo #review'.")] string tags,
+        [Description("Notebook name to act on.")] string notebook,
+        [Description("Section name to scope to (optional).")] string? section = null,
+        [Description("Page name to scope to (optional).")] string? page = null,
         CancellationToken cancellationToken = default)
     {
         EnsureWritesAllowed();
-        await ReadStdout(OneMoreCommand.AddHashtag(tags), cancellationToken);
+        await ReadStdout(OneMoreCommand.AddHashtag(tags, notebook, section, page), cancellationToken);
         return "Hashtag(s) added.";
     }
 
     [McpServerTool(Name = "remove_hashtag")]
-    [Description("Remove one or more hashtags from the current page(s). Requires writes to be enabled.")]
+    [Description("Remove one or more hashtags from pages in a notebook (optionally scoped to a section/page). Requires writes to be enabled.")]
     public async Task<string> RemoveHashtag(
         [Description("Space-separated tags to remove.")] string tags,
+        [Description("Notebook name to act on.")] string notebook,
+        [Description("Section name to scope to (optional).")] string? section = null,
+        [Description("Page name to scope to (optional).")] string? page = null,
         CancellationToken cancellationToken = default)
     {
         EnsureWritesAllowed();
-        await ReadStdout(OneMoreCommand.RemoveHashtag(tags), cancellationToken);
+        await ReadStdout(OneMoreCommand.RemoveHashtag(tags, notebook, section, page), cancellationToken);
         return "Hashtag(s) removed.";
     }
 

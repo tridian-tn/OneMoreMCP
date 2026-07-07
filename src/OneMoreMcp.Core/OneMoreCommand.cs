@@ -84,11 +84,15 @@ public sealed class OneMoreCommand
         new OneMoreCommand("PutPage")
             .Option("notebook", notebook).Option("section", section).Option("page", page).Option("infile", infile).Switch("force", force);
 
-    public static OneMoreCommand AddHashtag(string tags) =>
-        new OneMoreCommand("AddHashtag").Option("tags", tags);
+    // AddHashtag/RemoveHashtag require --notebook (section/page optional); a missing required option
+    // makes the CLI drop into an interactive prompt, so always supply the notebook.
+    public static OneMoreCommand AddHashtag(string tags, string? notebook, string? section = null, string? page = null) =>
+        new OneMoreCommand("AddHashtag")
+            .Option("notebook", notebook).Option("section", section).Option("page", page).Option("tags", tags);
 
-    public static OneMoreCommand RemoveHashtag(string tags) =>
-        new OneMoreCommand("RemoveHashtag").Option("tags", tags);
+    public static OneMoreCommand RemoveHashtag(string tags, string? notebook, string? section = null, string? page = null) =>
+        new OneMoreCommand("RemoveHashtag")
+            .Option("notebook", notebook).Option("section", section).Option("page", page).Option("tags", tags);
 
     // InsertToc requires --notebook, --section, --page and a --refresh yes/no value.
     public static OneMoreCommand InsertToc(string? notebook, string? section, string? page, bool refresh) =>

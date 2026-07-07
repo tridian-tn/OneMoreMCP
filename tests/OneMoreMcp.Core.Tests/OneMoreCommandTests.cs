@@ -9,7 +9,7 @@ public class OneMoreCommandTests
     public void GetHierarchy_includes_only_supplied_options()
     {
         var argv = OneMoreCommand.GetHierarchy(notebook: "Work", section: null, books: true).Build();
-        Assert.Equal(new[] { "GetHierarchy", "--notebook", "Work", "--books" }, argv);
+        Assert.Equal(new[] { "GetHierarchy", "--notebook", "Work", "--books", "yes" }, argv);
     }
 
     [Fact]
@@ -22,7 +22,7 @@ public class OneMoreCommandTests
     public void GetPage_current_omits_notebook_section_and_page()
     {
         var argv = OneMoreCommand.GetPage(notebook: null, section: null, page: null, current: true).Build();
-        Assert.Equal(new[] { "GetPage", "--current" }, argv);
+        Assert.Equal(new[] { "GetPage", "--current", "yes" }, argv);
     }
 
     [Fact]
@@ -36,15 +36,26 @@ public class OneMoreCommandTests
     public void PutPage_forces_by_default_and_carries_the_infile()
     {
         var argv = OneMoreCommand.PutPage(notebook: "B", section: "S", page: null, infile: @"C:\t\p.xml").Build();
-        Assert.Equal(new[] { "PutPage", "--notebook", "B", "--section", "S", "--infile", @"C:\t\p.xml", "--force" }, argv);
+        Assert.Equal(new[] { "PutPage", "--notebook", "B", "--section", "S", "--infile", @"C:\t\p.xml", "--force", "yes" }, argv);
     }
 
     [Fact]
     public void SearchHashtags_allTags_adds_the_switch()
     {
         Assert.Equal(
-            new[] { "SearchHashtags", "--query", "#a #b", "--allTags" },
+            new[] { "SearchHashtags", "--query", "#a #b", "--allTags", "yes" },
             OneMoreCommand.SearchHashtags("#a #b", allTags: true).Build());
+    }
+
+    [Fact]
+    public void InsertToc_always_emits_refresh_yes_or_no()
+    {
+        Assert.Equal(
+            new[] { "InsertToc", "--notebook", "B", "--section", "S", "--page", "P", "--refresh", "no" },
+            OneMoreCommand.InsertToc("B", "S", "P", refresh: false).Build());
+        Assert.Equal(
+            new[] { "InsertToc", "--notebook", "B", "--section", "S", "--page", "P", "--refresh", "yes" },
+            OneMoreCommand.InsertToc("B", "S", "P", refresh: true).Build());
     }
 
     [Fact]

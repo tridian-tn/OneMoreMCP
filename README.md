@@ -252,6 +252,18 @@ There are two ways to change a page, with deliberately different safety models:
   `export`, and `run_cleanup`. Enable them by setting `"AllowWrites": true` in the config. Gated
   tools return a clear "writes are disabled" error until you do.
 
+> [!WARNING]
+> **Writing to existing pages may not persist in all environments.** `append_to_page` and
+> `create_or_update_page` (overwrite) go through the OneMore CLI's `PutPage`, which wraps OneNote's
+> `UpdatePageContent`. In testing against **OneDrive/SharePoint-synced** notebooks, *creating* a new
+> page works, but *overwriting an existing* page reported success yet did not round-trip on a
+> subsequent read — the same behaviour occurs calling `OneMoreCli.exe PutPage` directly, so it is a
+> OneMore/OneNote/sync behaviour rather than this server. Two practical notes:
+> - The change may still apply in the **live OneNote UI** even when a fresh CLI read doesn't show it.
+> - It's worth verifying against a **local (non-synced) notebook**, and with OneNote open on the target.
+>
+> Reads (`list_hierarchy`, `get_page`, `search`) are verified working end to end.
+
 ## Concurrency note
 
 OneNote automation is effectively single-threaded, so the app **serialises every CLI invocation**

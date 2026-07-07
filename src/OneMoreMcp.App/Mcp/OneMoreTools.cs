@@ -80,29 +80,28 @@ public sealed class OneMoreTools
     [McpServerTool(Name = "append_to_page")]
     [Description("Append text to the end of a OneNote page WITHOUT sending the page's existing content to the model. "
         + "The server fetches the page locally, adds your text as new paragraph(s), and writes it back — it can only add, "
-        + "never overwrite. Always available (independent of the write gate). Target by section+page or current=true.")]
+        + "never overwrite. Always available (independent of the write gate). Requires notebook + section + page.")]
     public async Task<string> AppendToPage(
         [Description("The text to append. One paragraph per line.")] string text,
+        [Description("Notebook name.")] string notebook,
+        [Description("Section name ('/'-delimited for nested sections).")] string section,
+        [Description("Page name.")] string page,
         [Description("Format of the text: 'markdown' (default), 'html', or 'plain'.")] string? format = null,
-        [Description("Notebook name. Required unless current=true.")] string? notebook = null,
-        [Description("Section name ('/'-delimited). Required unless current=true.")] string? section = null,
-        [Description("Page name. Required unless current=true.")] string? page = null,
-        [Description("Append to the page currently open in OneNote instead of notebook+section+page.")] bool current = false,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(text))
             throw new ArgumentException("There is no text to append.", nameof(text));
 
         // 1. Fetch the page's raw XML locally — this is NOT returned to the caller.
-        var pageXml = await ReadPageXml(notebook, section, page, current, cancellationToken);
+        var pageXml = await ReadPageXml(notebook, section, page, current: false, cancellationToken);
 
         // 2. Insert the new text, preserving everything else.
         var updated = PageAppender.Append(pageXml, text, ParseAppendFormat(format));
 
-        // 3. Write it back via PutPage --force. The page is located by the ID carried in the XML.
+        // 3. Write it back via PutPage --page --force (overwrites the same page with the added content).
         await PutPageXml(updated, notebook, section, page, cancellationToken);
-        _log.LogInformation("Appended text to a OneNote page (notebook='{Notebook}', section='{Section}', page='{Page}', current={Current}).",
-            notebook, section, page, current);
+        _log.LogInformation("Appended text to a OneNote page (notebook='{Notebook}', section='{Section}', page='{Page}').",
+            notebook, section, page);
         return "Appended.";
     }
 
@@ -148,14 +147,16 @@ public sealed class OneMoreTools
     }
 
     [McpServerTool(Name = "insert_toc")]
-    [Description("Insert (or refresh) a table of contents on a page. Requires writes to be enabled.")]
+    [Description("Insert (or refresh) a table of contents on a page. Requires notebook + section + page, and writes to be enabled.")]
     public async Task<string> InsertToc(
-        [Description("Page name to insert the TOC on. Omit for the current page.")] string? page = null,
+        [Description("Notebook name.")] string notebook,
+        [Description("Section name ('/'-delimited).")] string section,
+        [Description("Page name to insert the TOC on.")] string page,
         [Description("Refresh an existing TOC instead of inserting a new one.")] bool refresh = false,
         CancellationToken cancellationToken = default)
     {
         EnsureWritesAllowed();
-        await ReadStdout(OneMoreCommand.InsertToc(page, refresh), cancellationToken);
+        await ReadStdout(OneMoreCommand.InsertToc(notebook, section, page, refresh), cancellationToken);
         return refresh ? "Table of contents refreshed." : "Table of contents inserted.";
     }
 
@@ -220,11 +221,17 @@ public sealed class OneMoreTools
     /// <summary>Writes page XML to a temp file and hands it to PutPage --force, cleaning up afterwards.</summary>
     private async Task PutPageXml(string pageXml, string? notebook, string? section, string? page, CancellationToken cancellationToken)
     {
+        // Strip attributes PutPage's schema rejects (e.g. omHash) so the write isn't silently discarded.
+        var sanitised = OneNotePage.PrepareForPut(pageXml);
         var temp = Path.Combine(Path.GetTempPath(), $"onemoremcp_{Guid.NewGuid():N}.xml");
-        await File.WriteAllTextAsync(temp, pageXml, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
+        await File.WriteAllTextAsync(temp, sanitised, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
         try
         {
-            await ReadStdout(OneMoreCommand.PutPage(notebook, section, page, temp, force: true), cancellationToken);
+            // PutPage prints nothing on success but reports schema/other errors on stdout while still
+            // exiting 0, so treat any output as a failure rather than falsely reporting success.
+            var output = await ReadStdout(OneMoreCommand.PutPage(notebook, section, page, temp, force: true), cancellationToken);
+            if (!string.IsNullOrWhiteSpace(output))
+                throw new InvalidOperationException($"OneMore PutPage did not apply the change: {output.Trim()}");
         }
         finally
         {

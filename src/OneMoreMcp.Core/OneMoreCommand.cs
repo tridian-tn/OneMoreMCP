@@ -32,10 +32,22 @@ public sealed class OneMoreCommand
         return this;
     }
 
-    /// <summary>Adds a bare <c>--flag</c> when <paramref name="present"/> is true; otherwise a no-op.</summary>
+    /// <summary>
+    /// Adds a <c>--flag yes</c> when <paramref name="present"/> is true; otherwise a no-op. The OneMore
+    /// CLI models booleans as <c>&lt;yes/no&gt;</c> options (default <c>no</c>), not bare switches, so a
+    /// value must be supplied — a bare <c>--flag</c> is treated as absent.
+    /// </summary>
     public OneMoreCommand Switch(string flag, bool present)
     {
-        if (present) _args.Add("--" + flag);
+        if (present) { _args.Add("--" + flag); _args.Add("yes"); }
+        return this;
+    }
+
+    /// <summary>Adds <c>--flag yes|no</c> unconditionally — for booleans the CLI marks as required.</summary>
+    public OneMoreCommand Bool(string flag, bool value)
+    {
+        _args.Add("--" + flag);
+        _args.Add(value ? "yes" : "no");
         return this;
     }
 
@@ -78,8 +90,10 @@ public sealed class OneMoreCommand
     public static OneMoreCommand RemoveHashtag(string tags) =>
         new OneMoreCommand("RemoveHashtag").Option("tags", tags);
 
-    public static OneMoreCommand InsertToc(string? page, bool refresh = false) =>
-        new OneMoreCommand("InsertToc").Option("page", page).Switch("refresh", refresh);
+    // InsertToc requires --notebook, --section, --page and a --refresh yes/no value.
+    public static OneMoreCommand InsertToc(string? notebook, string? section, string? page, bool refresh) =>
+        new OneMoreCommand("InsertToc")
+            .Option("notebook", notebook).Option("section", section).Option("page", page).Bool("refresh", refresh);
 
     public static OneMoreCommand Export(string outpath, string format, string? pageId = null, bool backup = false) =>
         new OneMoreCommand("Export").Option("outpath", outpath).Option("format", format).Option("pageId", pageId).Switch("backup", backup);

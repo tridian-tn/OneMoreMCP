@@ -73,6 +73,16 @@ public class OneMoreCommandTests
     }
 
     [Fact]
+    public void Output_appends_the_global_output_option()
+    {
+        var argv = OneMoreCommand.GetPage(notebook: "N", section: "S", page: "P", current: false)
+            .Output(@"C:\tmp\o.xml").Build();
+        Assert.Equal(
+            new[] { "GetPage", "--notebook", "N", "--section", "S", "--page", "P", "--output", @"C:\tmp\o.xml" },
+            argv);
+    }
+
+    [Fact]
     public void ToString_quotes_only_arguments_with_spaces()
     {
         var cmd = OneMoreCommand.GetPage(notebook: "Book", section: "My Section", page: "Notes", current: false);

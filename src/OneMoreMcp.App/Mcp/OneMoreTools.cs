@@ -38,7 +38,7 @@ public sealed class OneMoreTools
         [Description("Output format: 'markdown' (default) or 'xml'.")] string? format = null,
         CancellationToken cancellationToken = default)
     {
-        var xml = await ReadStdout(OneMoreCommand.GetHierarchy(notebook, section, booksOnly), cancellationToken);
+        var xml = await ReadContent(OneMoreCommand.GetHierarchy(notebook, section, booksOnly), cancellationToken);
         return AsXml(format) ? xml : OneNoteContent.HierarchyToMarkdown(xml);
     }
 
@@ -63,7 +63,7 @@ public sealed class OneMoreTools
         [Description("Output format: 'markdown' (default) or 'xml'.")] string? format = null,
         CancellationToken cancellationToken = default)
     {
-        var xml = await ReadStdout(OneMoreCommand.Search(query), cancellationToken);
+        var xml = await ReadContent(OneMoreCommand.Search(query), cancellationToken);
         return AsXml(format) ? xml : OneNoteContent.HierarchyToMarkdown(xml);
     }
 
@@ -73,7 +73,7 @@ public sealed class OneMoreTools
         [Description("The hashtag query.")] string query,
         [Description("Require all tags to match (AND) rather than any (OR).")] bool allTags = false,
         CancellationToken cancellationToken = default) =>
-        await ReadStdout(OneMoreCommand.SearchHashtags(query, allTags), cancellationToken);
+        await ReadContent(OneMoreCommand.SearchHashtags(query, allTags), cancellationToken);
 
     // ---------------- Append (ungated, token-free) ----------------
 
@@ -217,20 +217,45 @@ public sealed class OneMoreTools
         return result.StdOut;
     }
 
+    /// <summary>
+    /// Runs a content-producing command with <c>--output &lt;temp&gt;</c> and returns the file's contents.
+    /// The CLI writes output straight to the file, avoiding the stdout/console-encoding corruption of
+    /// non-ASCII page content that can occur when capturing piped output. Requires a OneMore build with
+    /// <c>--output</c> support.
+    /// </summary>
+    private async Task<string> ReadContent(OneMoreCommand command, CancellationToken cancellationToken)
+    {
+        var temp = NewTempFile();
+        try
+        {
+            var result = await _runner.RunAsync(command.Output(temp), cancellationToken);
+            if (!result.Ok)
+                throw new InvalidOperationException(
+                    $"OneMore CLI '{command.Name}' failed (exit {result.ExitCode}): {Trim(result.StdErr, result.StdOut)}");
+            // On success the payload is in the file; a non-empty stdout is a diagnostic the CLI printed.
+            return File.Exists(temp)
+                ? await File.ReadAllTextAsync(temp, cancellationToken)
+                : result.StdOut;
+        }
+        finally
+        {
+            try { File.Delete(temp); } catch { /* best effort */ }
+        }
+    }
+
     private async Task<string> ReadPageXml(string? notebook, string? section, string? page, bool current, CancellationToken cancellationToken)
     {
         if (!current && (string.IsNullOrWhiteSpace(notebook) || string.IsNullOrWhiteSpace(section) || string.IsNullOrWhiteSpace(page)))
             throw new ArgumentException("Specify notebook, section, and page together — or set current=true.");
-        return await ReadStdout(OneMoreCommand.GetPage(notebook, section, page, current), cancellationToken);
+        return await ReadContent(OneMoreCommand.GetPage(notebook, section, page, current), cancellationToken);
     }
 
     /// <summary>Writes page XML to a temp file and hands it to PutPage --force, cleaning up afterwards.</summary>
     private async Task PutPageXml(string pageXml, string? notebook, string? section, string? page, CancellationToken cancellationToken)
     {
-        // Strip attributes PutPage's schema rejects (e.g. omHash) so the write isn't silently discarded.
-        var sanitised = OneNotePage.PrepareForPut(pageXml);
-        var temp = Path.Combine(Path.GetTempPath(), $"onemoremcp_{Guid.NewGuid():N}.xml");
-        await File.WriteAllTextAsync(temp, sanitised, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
+        // The XML is sent as-is (omHash intact): PutPage accepts it and uses omHash for change detection.
+        var temp = NewTempFile();
+        await File.WriteAllTextAsync(temp, pageXml, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
         try
         {
             // PutPage prints nothing on success but reports schema/other errors on stdout while still
@@ -244,6 +269,9 @@ public sealed class OneMoreTools
             try { File.Delete(temp); } catch { /* best effort */ }
         }
     }
+
+    private static string NewTempFile() =>
+        Path.Combine(Path.GetTempPath(), $"onemoremcp_{Guid.NewGuid():N}.xml");
 
     private void EnsureWritesAllowed()
     {

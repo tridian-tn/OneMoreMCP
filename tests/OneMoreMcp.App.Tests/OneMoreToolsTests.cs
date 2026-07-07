@@ -112,12 +112,27 @@ public class OneMoreToolsTests
             // Capture the XML handed to PutPage via --infile so tests can assert on it.
             if (command.Name == "PutPage")
             {
-                var i = argv.ToList().IndexOf("--infile");
-                if (i >= 0 && i + 1 < argv.Count) LastInfileXml = File.ReadAllText(argv[i + 1]);
+                var infile = OptionValue(argv, "--infile");
+                if (infile != null) LastInfileXml = File.ReadAllText(infile);
             }
 
-            var stdout = command.Name == "GetPage" ? SamplePageXml : "";
-            return Task.FromResult(new CliResult(0, stdout, ""));
+            var content = command.Name == "GetPage" ? SamplePageXml : "";
+
+            // Simulate --output: the CLI writes the payload to the file and leaves stdout empty.
+            var outputFile = OptionValue(argv, "--output");
+            if (outputFile != null)
+            {
+                File.WriteAllText(outputFile, content);
+                content = "";
+            }
+
+            return Task.FromResult(new CliResult(0, content, ""));
+        }
+
+        private static string? OptionValue(IReadOnlyList<string> argv, string flag)
+        {
+            var i = argv.ToList().IndexOf(flag);
+            return i >= 0 && i + 1 < argv.Count ? argv[i + 1] : null;
         }
     }
 

@@ -9,8 +9,8 @@ generating code.
 
 - **`src/OneMoreMcp.Core`** (`net10.0`) — the pure engine. **No UI, hosting, or Windows dependencies**,
   so it stays unit-testable. Holds `OneMoreCommand` (the CLI argument builder), `OneNoteContent`
-  (OneNote XML → Markdown projections), `PageAppender` (append text into page XML), `OneNotePage`
-  (`PrepareForPut` — strips write-rejected attributes), and `CliResult` / `CliException`.
+  (OneNote XML → Markdown projections), `PageAppender` (append text into page XML), and
+  `CliResult` / `CliException`.
 - **`src/OneMoreMcp.App`** (`net10.0-windows`) — WinForms tray icon + ASP.NET Core (Kestrel) host
   running the MCP server, plus `OneMoreCliRunner` (process orchestration), the MCP tools
   (`Mcp/OneMoreTools`), options, HTTPS/certificate handling, single-instance, and run-at-logon.
@@ -35,8 +35,11 @@ against `OneMoreCli.exe` directly; **guard them, and flag any change that reintr
   parameter makes the CLI drop into an **interactive prompt that re-prompts forever** with no console,
   emitting unbounded output. `OneMoreCliRunner` guards this (closes child stdin, caps captured output,
   kills on overflow) — do not remove that guard, and keep command factories complete.
-- **`PutPage` schema-rejects the `omHash` attribute** that `GetPage` emits. Always pass page XML through
-  `OneNotePage.PrepareForPut` before a write. Don't send raw `GetPage` output to `PutPage`.
+- **Read content via `--output <file>`, not stdout.** Content commands (`GetPage`, `GetHierarchy`,
+  `Search`, `SearchHashtags`) are run through `ReadContent`, which appends `--output <temp>` and reads
+  the file — the CLI's stdout capture corrupts non-ASCII content. Writes (`PutPage`, etc.) keep stdout
+  capture for success/error detection. Page XML is sent to `PutPage` **with `omHash` intact** (the CLI
+  accepts it and uses it for change detection); do not strip it.
 - **The CLI exits 0 even on errors** (the message goes to stdout). Do not gate success on the exit code
   alone: reads return stdout; `PutPage` prints nothing on success, so any non-empty `PutPage` output is
   treated as a failure. Preserve that check.

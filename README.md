@@ -252,18 +252,18 @@ There are two ways to change a page, with deliberately different safety models:
   `export`, and `run_cleanup`. Enable them by setting `"AllowWrites": true` in the config. Gated
   tools return a clear "writes are disabled" error until you do.
 
-> [!WARNING]
-> **Content-writes currently don't persist — tracked upstream as [OneMore #2322][2322].** The
-> content-changing tools (`append_to_page`, `create_or_update_page`, `add_hashtag` /
-> `remove_hashtag`, `insert_toc`, `run_cleanup`) go through the OneMore CLI's `PutPage` /
-> `AddHashtag`, which wrap OneNote's `UpdatePageContent`. Those commands report success (exit 0) but
-> the change does not appear on a subsequent read. This reproduces calling `OneMoreCli.exe` directly
-> — so it's a OneMore/OneNote behaviour, **not this server** — and is independent of the notebook:
-> it fails identically on OneDrive-synced *and* local notebooks. Page *creation* and all reads
-> (`list_hierarchy`, `get_page`, `search`) work. The write tools are kept in place so they light up
-> automatically once the upstream issue is resolved.
+> [!IMPORTANT]
+> **Requires a OneMore build newer than 7.2.0** (with [#2323][2323] and [#2324][2324], the fixes for
+> [#2322][2322]). This server reads page/hierarchy content via the CLI's `--output <file>` option
+> (added after 7.2.0) to avoid stdout/console-encoding corruption of non-ASCII content, and writes
+> page XML with its `omHash` attributes intact (older CLIs rejected them). On 7.2.0 or earlier the
+> read commands will fail. Content-write persistence (`append_to_page`, `create_or_update_page`,
+> hashtags, `insert_toc`, `run_cleanup`) depends on the #2322 fix and should be re-verified against
+> the release that ships it.
 >
 > [2322]: https://github.com/stevencohn/OneMore/issues/2322
+> [2323]: https://github.com/stevencohn/OneMore/pull/2323
+> [2324]: https://github.com/stevencohn/OneMore/pull/2324
 
 ## Concurrency note
 

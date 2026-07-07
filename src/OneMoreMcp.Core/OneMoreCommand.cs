@@ -51,6 +51,13 @@ public sealed class OneMoreCommand
         return this;
     }
 
+    /// <summary>
+    /// Adds the CLI's global <c>--output &lt;file&gt;</c> option, directing command output to a file
+    /// instead of stdout. Avoids console/shell encoding corruption of non-ASCII page content.
+    /// Requires a OneMore build that supports <c>--output</c> (added in the CLI after 7.2.0).
+    /// </summary>
+    public OneMoreCommand Output(string? path) => Option("output", path);
+
     /// <summary>The full argument vector: the command name followed by its options, in order.</summary>
     public IReadOnlyList<string> Build()
     {

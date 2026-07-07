@@ -1,0 +1,104 @@
+name: Release
+
+# Build, package and publish a GitHub Release whenever a version tag is pushed.
+# Tag the commit you want to ship, e.g.:
+#   git tag v1.2.3 && git push origin v1.2.3
+# Pre-release tags (containing a hyphen, e.g. v1.2.3-beta.1) are marked as
+# pre-releases automatically.
+#
+# Builds are framework-dependent: users must have the .NET 10 Desktop Runtime
+# AND the ASP.NET Core 10 Runtime installed (the app hosts the MCP server over
+# Kestrel). Both win-x64 and win-arm64 are produced.
+on:
+  push:
+    tags:
+      - 'v*'
+
+# Needed for the gh CLI to create the release and upload assets.
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [win-x64, win-arm64]
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Install .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 10.0.x
+
+    - name: Derive version from tag
+      id: version
+      # Only used to name the artifact and zip below. The build version itself is derived from the
+      # tag by MinVer (see Directory.Build.props); the two agree, as MinVer emits X.Y.Z on a tagged
+      # commit. fetch-depth: 0 above gives MinVer the tag it needs.
+      shell: bash
+      run: |
+        TAG="${GITHUB_REF#refs/tags/}"     # e.g. v1.2.3 or v1.2.3-beta.1
+        VERSION="${TAG#v}"                 # e.g. 1.2.3 or 1.2.3-beta.1
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+        echo "Building $VERSION for ${{ matrix.rid }}"
+
+    - name: Publish
+      run: >
+        dotnet publish src/OneMoreMcp.App/OneMoreMcp.App.csproj
+        -c Release
+        -r ${{ matrix.rid }}
+        --self-contained false
+        -o publish
+
+    - name: Package
+      id: package
+      shell: pwsh
+      run: |
+        $zip = "OneMoreMcp-${{ steps.version.outputs.version }}-${{ matrix.rid }}.zip"
+        Compress-Archive -Path publish/* -DestinationPath $zip -Force
+        "zip=$zip" >> $env:GITHUB_OUTPUT
+
+    - name: Upload build artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: OneMoreMcp-${{ steps.version.outputs.version }}-${{ matrix.rid }}
+        path: ${{ steps.package.outputs.zip }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Derive version from tag
+      id: version
+      run: |
+        TAG="${GITHUB_REF#refs/tags/}"
+        VERSION="${TAG#v}"
+        if [ "$VERSION" != "${VERSION%%-*}" ]; then PRERELEASE=true; else PRERELEASE=false; fi
+        {
+          echo "tag=$TAG"
+          echo "prerelease=$PRERELEASE"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: dist
+        merge-multiple: true
+
+    - name: Create GitHub Release
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+      run: |
+        FLAGS=(--title "${{ steps.version.outputs.tag }}" --generate-notes)
+        if [ "${{ steps.version.outputs.prerelease }}" = "true" ]; then FLAGS+=(--prerelease); fi
+        gh release create "${{ steps.version.outputs.tag }}" dist/*.zip "${FLAGS[@]}"

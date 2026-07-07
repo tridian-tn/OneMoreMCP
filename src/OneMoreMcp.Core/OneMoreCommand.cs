@@ -56,8 +56,11 @@ public sealed class OneMoreCommand
     public static OneMoreCommand GetHierarchy(string? notebook = null, string? section = null, bool books = false) =>
         new OneMoreCommand("GetHierarchy").Option("notebook", notebook).Option("section", section).Switch("books", books);
 
-    public static OneMoreCommand GetPage(string? section, string? page, bool current) =>
-        new OneMoreCommand("GetPage").Option("section", section).Option("page", page).Switch("current", current);
+    // GetPage requires --notebook together with --section/--page (the CLI docs omit --notebook, but the
+    // real CLI rejects --page without it); --current needs none of them.
+    public static OneMoreCommand GetPage(string? notebook, string? section, string? page, bool current) =>
+        new OneMoreCommand("GetPage")
+            .Option("notebook", notebook).Option("section", section).Option("page", page).Switch("current", current);
 
     public static OneMoreCommand Search(string query) =>
         new OneMoreCommand("Search").Option("query", query);
@@ -65,8 +68,9 @@ public sealed class OneMoreCommand
     public static OneMoreCommand SearchHashtags(string query, bool allTags = false) =>
         new OneMoreCommand("SearchHashtags").Option("query", query).Switch("allTags", allTags);
 
-    public static OneMoreCommand PutPage(string? section, string? page, string infile, bool force = true) =>
-        new OneMoreCommand("PutPage").Option("section", section).Option("page", page).Option("infile", infile).Switch("force", force);
+    public static OneMoreCommand PutPage(string? notebook, string? section, string? page, string infile, bool force = true) =>
+        new OneMoreCommand("PutPage")
+            .Option("notebook", notebook).Option("section", section).Option("page", page).Option("infile", infile).Switch("force", force);
 
     public static OneMoreCommand AddHashtag(string tags) =>
         new OneMoreCommand("AddHashtag").Option("tags", tags);

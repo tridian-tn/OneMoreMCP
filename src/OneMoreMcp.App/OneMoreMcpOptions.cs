@@ -28,10 +28,10 @@ public sealed class OneMoreMcpOptions
     /// </summary>
     public string CliPath { get; set; } = DefaultCliPath;
 
-    /// <summary>The conventional OneMore CLI install location: <c>%ProgramFiles%\River Software\OneMore\OneMoreCli.exe</c>.</summary>
+    /// <summary>The conventional OneMore CLI install location: <c>%ProgramFiles%\River\OneMoreAddIn\OneMoreCli.exe</c>.</summary>
     public static string DefaultCliPath { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-        "River Software", "OneMore", "OneMoreCli.exe");
+        "River", "OneMoreAddIn", "OneMoreCli.exe");
 
     /// <summary>
     /// Master gate for content-changing tools (create/overwrite pages, export, hashtags, cleanup).

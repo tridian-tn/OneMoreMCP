@@ -19,24 +19,24 @@ public class OneMoreCommandTests
     }
 
     [Fact]
-    public void GetPage_current_omits_section_and_page()
+    public void GetPage_current_omits_notebook_section_and_page()
     {
-        var argv = OneMoreCommand.GetPage(section: null, page: null, current: true).Build();
+        var argv = OneMoreCommand.GetPage(notebook: null, section: null, page: null, current: true).Build();
         Assert.Equal(new[] { "GetPage", "--current" }, argv);
     }
 
     [Fact]
-    public void GetPage_by_name_keeps_spaces_unquoted_in_argv()
+    public void GetPage_by_name_includes_notebook_and_keeps_spaces_unquoted()
     {
-        var argv = OneMoreCommand.GetPage(section: "My Section", page: "Meeting Notes", current: false).Build();
-        Assert.Equal(new[] { "GetPage", "--section", "My Section", "--page", "Meeting Notes" }, argv);
+        var argv = OneMoreCommand.GetPage(notebook: "My Book", section: "My Section", page: "Meeting Notes", current: false).Build();
+        Assert.Equal(new[] { "GetPage", "--notebook", "My Book", "--section", "My Section", "--page", "Meeting Notes" }, argv);
     }
 
     [Fact]
     public void PutPage_forces_by_default_and_carries_the_infile()
     {
-        var argv = OneMoreCommand.PutPage(section: "S", page: null, infile: @"C:\t\p.xml").Build();
-        Assert.Equal(new[] { "PutPage", "--section", "S", "--infile", @"C:\t\p.xml", "--force" }, argv);
+        var argv = OneMoreCommand.PutPage(notebook: "B", section: "S", page: null, infile: @"C:\t\p.xml").Build();
+        Assert.Equal(new[] { "PutPage", "--notebook", "B", "--section", "S", "--infile", @"C:\t\p.xml", "--force" }, argv);
     }
 
     [Fact]
@@ -57,8 +57,8 @@ public class OneMoreCommandTests
     [Fact]
     public void ToString_quotes_only_arguments_with_spaces()
     {
-        var cmd = OneMoreCommand.GetPage(section: "My Section", page: "Notes", current: false);
-        Assert.Equal("GetPage --section \"My Section\" --page Notes", cmd.ToString());
+        var cmd = OneMoreCommand.GetPage(notebook: "Book", section: "My Section", page: "Notes", current: false);
+        Assert.Equal("GetPage --notebook Book --section \"My Section\" --page Notes", cmd.ToString());
     }
 
     [Fact]

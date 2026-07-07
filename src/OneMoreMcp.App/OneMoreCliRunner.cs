@@ -27,7 +27,13 @@ public interface IOneMoreRunner
 /// </summary>
 public sealed class OneMoreCliRunner : IOneMoreRunner
 {
-    private static readonly string[] DefaultRelativePath = { "River Software", "OneMore", "OneMoreCli.exe" };
+    // Candidate install layouts, relative to a Program Files / LocalAppData root. The first is the
+    // actual current layout; the second is what the OneMore CLI docs describe (kept for older/other builds).
+    private static readonly string[][] CandidateRelativePaths =
+    {
+        new[] { "River", "OneMoreAddIn", "OneMoreCli.exe" },
+        new[] { "River Software", "OneMore", "OneMoreCli.exe" },
+    };
 
     private readonly IOptionsMonitor<OneMoreMcpOptions> _options;
     private readonly ILogger<OneMoreCliRunner> _log;
@@ -47,10 +53,13 @@ public sealed class OneMoreCliRunner : IOneMoreRunner
         if (!string.IsNullOrWhiteSpace(configured) && File.Exists(configured))
             return configured;
 
-        foreach (var root in ProgramFilesRoots())
+        foreach (var root in SearchRoots())
         {
-            var candidate = Path.Combine(new[] { root }.Concat(DefaultRelativePath).ToArray());
-            if (File.Exists(candidate)) return candidate;
+            foreach (var relative in CandidateRelativePaths)
+            {
+                var candidate = Path.Combine(new[] { root }.Concat(relative).ToArray());
+                if (File.Exists(candidate)) return candidate;
+            }
         }
         return null;
     }
@@ -143,9 +152,15 @@ public sealed class OneMoreCliRunner : IOneMoreRunner
         catch { /* best effort — the process may have exited between the check and the kill */ }
     }
 
-    private static IEnumerable<string> ProgramFilesRoots()
+    private static IEnumerable<string> SearchRoots()
     {
-        foreach (var folder in new[] { Environment.SpecialFolder.ProgramFiles, Environment.SpecialFolder.ProgramFilesX86 })
+        var folders = new[]
+        {
+            Environment.SpecialFolder.ProgramFiles,
+            Environment.SpecialFolder.ProgramFilesX86,
+            Environment.SpecialFolder.LocalApplicationData, // some add-in installs land here
+        };
+        foreach (var folder in folders)
         {
             var path = Environment.GetFolderPath(folder);
             if (!string.IsNullOrEmpty(path)) yield return path;

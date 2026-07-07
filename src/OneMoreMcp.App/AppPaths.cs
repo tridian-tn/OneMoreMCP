@@ -34,7 +34,7 @@ internal static class AppPaths
             "Port": 3002,
             "UseHttps": false,
             "TrustCertificate": true,
-            "CliPath": "C:\\Program Files\\River Software\\OneMore\\OneMoreCli.exe",
+            "CliPath": "C:\\Program Files\\River\\OneMoreAddIn\\OneMoreCli.exe",
             "AllowWrites": false,
             "DefaultFormat": "markdown",
             "CommandTimeoutSeconds": 150,

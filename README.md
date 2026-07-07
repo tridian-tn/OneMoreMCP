@@ -15,7 +15,8 @@ OneNote session, so concurrent tool calls are serialised safely.
 
 - Windows 10/11
 - **Desktop OneNote with the [OneMore add-in][onemore] installed.** OneMore ships the CLI at
-  `%ProgramFiles%\River Software\OneMore\OneMoreCli.exe`, which this app drives.
+  `%ProgramFiles%\River\OneMoreAddIn\OneMoreCli.exe`, which this app drives. (The OneMore CLI docs
+  quote an older `River Software\OneMore` path; the app auto-detects both.)
 - **To run**: both the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0)
   **and** the ASP.NET Core 10 Runtime (the app hosts its MCP server over Kestrel). Release downloads
   are framework-dependent, so both must be installed first — they are the "Desktop Runtime" and
@@ -70,7 +71,7 @@ Edit it (tray menu → **Open configuration…**). `CliPath`, `AllowWrites`, `De
     "Port": 3002,
     "UseHttps": false,
     "TrustCertificate": true,
-    "CliPath": "C:\\Program Files\\River Software\\OneMore\\OneMoreCli.exe",
+    "CliPath": "C:\\Program Files\\River\\OneMoreAddIn\\OneMoreCli.exe",
     "AllowWrites": false,
     "DefaultFormat": "markdown",
     "CommandTimeoutSeconds": 150,
@@ -86,9 +87,10 @@ Edit it (tray menu → **Open configuration…**). `CliPath`, `AllowWrites`, `De
 - **Port**: loopback TCP port; the server binds `127.0.0.1`/`::1` only.
 - **UseHttps** / **TrustCertificate**: serve over TLS with a self-signed localhost certificate; see
   [HTTPS](#https). Off by default — loopback-only HTTP never leaves your machine.
-- **CliPath**: full path to `OneMoreCli.exe`. Defaults to the standard install location shown above.
-  If that path doesn't exist (or is blank), the app auto-detects it under Program Files / Program
-  Files x86. Set it explicitly if OneMore is installed somewhere non-standard.
+- **CliPath**: full path to `OneMoreCli.exe`. Defaults to the standard install location shown above
+  (`River\OneMoreAddIn`). If that path doesn't exist (or is blank), the app auto-detects it under
+  Program Files, Program Files x86, and LocalAppData — trying both the current `River\OneMoreAddIn`
+  layout and the older documented `River Software\OneMore` one. Set it explicitly for a non-standard install.
 - **AllowWrites**: master gate for content-changing tools (create/overwrite pages, hashtags, TOC,
   export, cleanup). **Off by default**, so a fresh install is read-only. The append-only
   `append_to_page` tool is exempt — see [Appending vs. writing](#appending-vs-writing).
@@ -218,7 +220,7 @@ OneMoreMcp.exe --disable-autostart
 | Tool | Purpose | Writes? |
 | --- | --- | --- |
 | `list_hierarchy` | Notebook/section/page tree (markdown or raw XML). | — |
-| `get_page` | A page's content by section+page, or `current`; markdown (default) or XML. | — |
+| `get_page` | A page's content by notebook+section+page, or `current`; markdown (default) or XML. | — |
 | `search` | Search OneNote for pages matching a query. | — |
 | `search_hashtags` | Search OneNote hashtags. | — |
 | `append_to_page` | **Append** text (markdown/html/plain) to a page. Fetches, adds, writes back — never sends the page's existing content to the model, never overwrites. | **ungated** |
@@ -318,11 +320,11 @@ The server is a **process orchestrator**: each tool builds a `OneMoreCli.exe` in
 
 | Tool | `OneMoreCli.exe` command |
 | --- | --- |
-| `list_hierarchy` | `GetHierarchy [--notebook] [--section] [--books]` |
-| `get_page` | `GetPage [--section] [--page \| --current]` |
+| `list_hierarchy` | `GetHierarchy [--notebook] [--section] [--books]` (XML; `--books` yields JSON) |
+| `get_page` | `GetPage --notebook --section --page` (all three required), or `--current` |
 | `search` / `search_hashtags` | `Search --query` / `SearchHashtags --query [--allTags]` |
 | `append_to_page` | `GetPage` (raw) → local append → `PutPage --infile <temp> --force` |
-| `create_or_update_page` | `PutPage [--section] [--page] --infile <temp> --force` |
+| `create_or_update_page` | `PutPage [--notebook] [--section] [--page] --infile <temp> --force` |
 | `add_hashtag` / `remove_hashtag` | `AddHashtag --tags` / `RemoveHashtag --tags` |
 | `insert_toc` | `InsertToc [--page] [--refresh]` |
 | `export` | `Export --outpath --format [--pageId] [--backup]` |

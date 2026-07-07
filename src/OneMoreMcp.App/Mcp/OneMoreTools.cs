@@ -43,15 +43,16 @@ public sealed class OneMoreTools
     }
 
     [McpServerTool(Name = "get_page")]
-    [Description("Get a page's content. Target it by section + page name, or set current=true for the page open in OneNote. Returns Markdown (default) or raw OneNote page XML.")]
+    [Description("Get a page's content. Target it by notebook + section + page name, or set current=true for the page open in OneNote. Returns Markdown (default) or raw OneNote page XML.")]
     public async Task<string> GetPage(
+        [Description("Notebook name. Required unless current=true.")] string? notebook = null,
         [Description("Section name ('/'-delimited for nested sections). Required unless current=true.")] string? section = null,
         [Description("Page name (quote-free; spaces are fine). Required unless current=true.")] string? page = null,
-        [Description("Use the page currently open in OneNote instead of section+page.")] bool current = false,
+        [Description("Use the page currently open in OneNote instead of notebook+section+page.")] bool current = false,
         [Description("Output format: 'markdown' (default) or 'xml'.")] string? format = null,
         CancellationToken cancellationToken = default)
     {
-        var xml = await ReadPageXml(section, page, current, cancellationToken);
+        var xml = await ReadPageXml(notebook, section, page, current, cancellationToken);
         return AsXml(format) ? xml : OneNoteContent.PageToMarkdown(xml);
     }
 
@@ -83,24 +84,25 @@ public sealed class OneMoreTools
     public async Task<string> AppendToPage(
         [Description("The text to append. One paragraph per line.")] string text,
         [Description("Format of the text: 'markdown' (default), 'html', or 'plain'.")] string? format = null,
+        [Description("Notebook name. Required unless current=true.")] string? notebook = null,
         [Description("Section name ('/'-delimited). Required unless current=true.")] string? section = null,
         [Description("Page name. Required unless current=true.")] string? page = null,
-        [Description("Append to the page currently open in OneNote instead of section+page.")] bool current = false,
+        [Description("Append to the page currently open in OneNote instead of notebook+section+page.")] bool current = false,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(text))
             throw new ArgumentException("There is no text to append.", nameof(text));
 
         // 1. Fetch the page's raw XML locally — this is NOT returned to the caller.
-        var pageXml = await ReadPageXml(section, page, current, cancellationToken);
+        var pageXml = await ReadPageXml(notebook, section, page, current, cancellationToken);
 
         // 2. Insert the new text, preserving everything else.
         var updated = PageAppender.Append(pageXml, text, ParseAppendFormat(format));
 
         // 3. Write it back via PutPage --force. The page is located by the ID carried in the XML.
-        await PutPageXml(updated, section, page, cancellationToken);
-        _log.LogInformation("Appended text to a OneNote page (section='{Section}', page='{Page}', current={Current}).",
-            section, page, current);
+        await PutPageXml(updated, notebook, section, page, cancellationToken);
+        _log.LogInformation("Appended text to a OneNote page (notebook='{Notebook}', section='{Section}', page='{Page}', current={Current}).",
+            notebook, section, page, current);
         return "Appended.";
     }
 
@@ -111,6 +113,7 @@ public sealed class OneMoreTools
         + "OVERWRITES the target page. Requires writes to be enabled. For simply adding text, use append_to_page instead.")]
     public async Task<string> CreateOrUpdatePage(
         [Description("The full OneNote page XML (one:Page document).")] string pageXml,
+        [Description("Notebook name to place the page in.")] string? notebook = null,
         [Description("Section name to place the page in ('/'-delimited).")] string? section = null,
         [Description("Page name. Omit to use the title/ID in the XML.")] string? page = null,
         CancellationToken cancellationToken = default)
@@ -118,7 +121,7 @@ public sealed class OneMoreTools
         EnsureWritesAllowed();
         if (string.IsNullOrWhiteSpace(pageXml))
             throw new ArgumentException("The page XML is empty.", nameof(pageXml));
-        await PutPageXml(pageXml, section, page, cancellationToken);
+        await PutPageXml(pageXml, notebook, section, page, cancellationToken);
         return "Page written.";
     }
 
@@ -207,21 +210,21 @@ public sealed class OneMoreTools
         return result.StdOut;
     }
 
-    private async Task<string> ReadPageXml(string? section, string? page, bool current, CancellationToken cancellationToken)
+    private async Task<string> ReadPageXml(string? notebook, string? section, string? page, bool current, CancellationToken cancellationToken)
     {
-        if (!current && string.IsNullOrWhiteSpace(page))
-            throw new ArgumentException("Specify a page (with its section), or set current=true.");
-        return await ReadStdout(OneMoreCommand.GetPage(section, page, current), cancellationToken);
+        if (!current && (string.IsNullOrWhiteSpace(notebook) || string.IsNullOrWhiteSpace(section) || string.IsNullOrWhiteSpace(page)))
+            throw new ArgumentException("Specify notebook, section, and page together — or set current=true.");
+        return await ReadStdout(OneMoreCommand.GetPage(notebook, section, page, current), cancellationToken);
     }
 
     /// <summary>Writes page XML to a temp file and hands it to PutPage --force, cleaning up afterwards.</summary>
-    private async Task PutPageXml(string pageXml, string? section, string? page, CancellationToken cancellationToken)
+    private async Task PutPageXml(string pageXml, string? notebook, string? section, string? page, CancellationToken cancellationToken)
     {
         var temp = Path.Combine(Path.GetTempPath(), $"onemoremcp_{Guid.NewGuid():N}.xml");
         await File.WriteAllTextAsync(temp, pageXml, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
         try
         {
-            await ReadStdout(OneMoreCommand.PutPage(section, page, temp, force: true), cancellationToken);
+            await ReadStdout(OneMoreCommand.PutPage(notebook, section, page, temp, force: true), cancellationToken);
         }
         finally
         {

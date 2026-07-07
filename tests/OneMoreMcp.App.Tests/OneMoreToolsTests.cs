@@ -50,7 +50,7 @@ public class OneMoreToolsTests
     public async Task Append_to_page_works_when_writes_disabled_and_round_trips_locally()
     {
         var (tools, runner) = Build(allowWrites: false);
-        var result = await tools.AppendToPage("New note", format: "plain", section: "S", page: "P", current: false);
+        var result = await tools.AppendToPage("New note", format: "plain", notebook: "N", section: "S", page: "P", current: false);
 
         Assert.Equal("Appended.", result);
         // It reads the page then writes it back — GetPage before PutPage.
@@ -65,17 +65,17 @@ public class OneMoreToolsTests
     {
         var (tools, _) = Build();
         await Assert.ThrowsAsync<ArgumentException>(
-            () => tools.AppendToPage("text", format: "plain", section: null, page: null, current: false));
+            () => tools.AppendToPage("text", format: "plain", notebook: null, section: null, page: null, current: false));
     }
 
     [Fact]
     public async Task Get_page_returns_markdown_by_default_and_xml_on_request()
     {
         var (tools, _) = Build();
-        var md = await tools.GetPage(section: "S", page: "P", current: false, format: null);
+        var md = await tools.GetPage(notebook: "N", section: "S", page: "P", current: false, format: null);
         Assert.StartsWith("# Title", md);
 
-        var xml = await tools.GetPage(section: "S", page: "P", current: false, format: "xml");
+        var xml = await tools.GetPage(notebook: "N", section: "S", page: "P", current: false, format: "xml");
         Assert.Contains("one:Page", xml);
     }
 

@@ -253,13 +253,12 @@ There are two ways to change a page, with deliberately different safety models:
   tools return a clear "writes are disabled" error until you do.
 
 > [!IMPORTANT]
-> **Requires a OneMore build newer than 7.2.0** (with [#2323][2323] and [#2324][2324], the fixes for
-> [#2322][2322]). This server reads page/hierarchy content via the CLI's `--output <file>` option
-> (added after 7.2.0) to avoid stdout/console-encoding corruption of non-ASCII content, and writes
-> page XML with its `omHash` attributes intact (older CLIs rejected them). On 7.2.0 or earlier the
-> read commands will fail. Content-write persistence (`append_to_page`, `create_or_update_page`,
-> hashtags, `insert_toc`, `run_cleanup`) depends on the #2322 fix and should be re-verified against
-> the release that ships it.
+> **Requires OneMore 7.3.0 or newer** (the release that fixed [#2322][2322] via [#2323][2323] +
+> [#2324][2324]). This server reads page/hierarchy content via the CLI's `--output <file>` option to
+> avoid stdout/console-encoding corruption of non-ASCII content, writes page XML with its `omHash`
+> attributes intact, and uses bare-switch booleans — all as of 7.3.0. On 7.2.0 or earlier the read
+> commands fail. Content-writes (`append_to_page`, `create_or_update_page`, hashtags, `insert_toc`,
+> `run_cleanup`) are **verified working on 7.3.0** (append round-trips and persists).
 >
 > [2322]: https://github.com/stevencohn/OneMore/issues/2322
 > [2323]: https://github.com/stevencohn/OneMore/pull/2323

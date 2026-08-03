@@ -16,3 +16,6 @@ x86/
 
 # Logs
 *.log
+
+# Local OneNote test notebooks (live binary files; never commit)
+testdata/

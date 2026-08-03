@@ -26,10 +26,9 @@ with tests. The tray/host layer is a thin adapter.
 The real CLI diverges from its documentation in ways that silently break writes. These were verified
 against `OneMoreCli.exe` directly; **guard them, and flag any change that reintroduces them**:
 
-- **Boolean flags are `--flag <yes/no>` valued options, not bare switches.** Emit `--force yes`, not a
-  bare `--force` (which the CLI treats as absent). Use `OneMoreCommand.Switch` (adds `--flag yes` when
-  true) or `Bool` (always `--flag yes|no`, for required booleans like `InsertToc --refresh`). Never add
-  a bare `--flag`.
+- **Boolean flags are bare switches** (OneMore 7.3.0+): presence enables them, absence uses the default.
+  Emit `--force` (via `OneMoreCommand.Switch`, which adds `--flag` only when true), never `--force yes`.
+  (7.2.0 briefly required `--flag yes`; that's gone.)
 - **Supply every REQUIRED parameter.** `GetPage`/`PutPage` need `--notebook` + `--section` + `--page`
   (unless `--current`); `AddHashtag`/`RemoveHashtag`/`InsertToc` need `--notebook`. A missing required
   parameter makes the CLI drop into an **interactive prompt that re-prompts forever** with no console,

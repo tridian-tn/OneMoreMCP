@@ -73,6 +73,13 @@ public class OneMoreCommandTests
     }
 
     [Fact]
+    public void Export_backup_adds_the_bare_switch()
+    {
+        var argv = OneMoreCommand.Export(outpath: @"C:\out", format: "PDF", backup: true).Build();
+        Assert.Equal(new[] { "Export", "--outpath", @"C:\out", "--format", "PDF", "--backup" }, argv);
+    }
+
+    [Fact]
     public void Output_appends_the_global_output_option()
     {
         var argv = OneMoreCommand.GetPage(notebook: "N", section: "S", page: "P", current: false)

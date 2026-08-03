@@ -14,8 +14,8 @@ generating code.
 - **`src/OneMoreMcp.App`** (`net10.0-windows`) — WinForms tray icon + ASP.NET Core (Kestrel) host
   running the MCP server, plus `OneMoreCliRunner` (process orchestration), the MCP tools
   (`Mcp/OneMoreTools`), options, HTTPS/certificate handling, single-instance, and run-at-logon.
-- **`tests/OneMoreMcp.Core.Tests`** (`net10.0`, xUnit) — argument building, XML transforms, append and
-  sanitiser round-trips. **`tests/OneMoreMcp.App.Tests`** (`net10.0-windows`) — tool policy (write
+- **`tests/OneMoreMcp.Core.Tests`** (`net10.0`, xUnit) — argument building, XML transforms, and append
+  round-trips. **`tests/OneMoreMcp.App.Tests`** (`net10.0-windows`) — tool policy (write
   gating, the ungated append path, export confinement) via a fake runner.
 
 Keep `Core` free of UI/host/Windows references. New CLI-argument or XML behaviour belongs in `Core`,

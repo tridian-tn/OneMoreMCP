@@ -68,6 +68,8 @@ public sealed class OneMoreTools
         [Description("Output format: 'markdown' (default) or 'xml'.")] string? format = null,
         CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(notebook))
+            throw new ArgumentException("A notebook is required for search.", nameof(notebook));
         var xml = await ReadContent(OneMoreCommand.Search(query, notebook, section, page), cancellationToken);
         return AsXml(format) ? xml : OneNoteContent.SearchResultsToMarkdown(xml);
     }
@@ -210,6 +212,8 @@ public sealed class OneMoreTools
         [Description("Notebook name to sync.")] string notebook,
         CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(notebook))
+            throw new ArgumentException("A notebook is required to sync.", nameof(notebook));
         var output = await RunChecked(OneMoreCommand.Sync(notebook), cancellationToken);
         return string.IsNullOrWhiteSpace(output) ? $"Synced '{notebook}'." : output.Trim();
     }
@@ -315,7 +319,11 @@ public sealed class OneMoreTools
             if (_options.CurrentValue.SyncAfterWrite && !string.IsNullOrWhiteSpace(notebook))
             {
                 try { await RunChecked(OneMoreCommand.Sync(notebook), cancellationToken); }
-                catch (Exception ex) { _log.LogWarning(ex, "Auto-sync after write failed for notebook '{Notebook}'.", notebook); }
+                // Cancellation isn't a sync failure — let it propagate; only warn on real errors.
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _log.LogWarning(ex, "Auto-sync after write failed for notebook '{Notebook}'.", notebook);
+                }
             }
         }
         finally

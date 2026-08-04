@@ -73,11 +73,22 @@ public sealed class OneMoreCommand
         new OneMoreCommand("GetPage")
             .Option("notebook", notebook).Option("section", section).Option("page", page).Switch("current", current);
 
-    public static OneMoreCommand Search(string query) =>
-        new OneMoreCommand("Search").Option("query", query);
+    // Search requires --notebook (7.3.0); --section/--page narrow the scope.
+    public static OneMoreCommand Search(string query, string? notebook, string? section = null, string? page = null) =>
+        new OneMoreCommand("Search")
+            .Option("notebook", notebook).Option("section", section).Option("page", page).Option("query", query);
 
-    public static OneMoreCommand SearchHashtags(string query, bool allTags = false) =>
-        new OneMoreCommand("SearchHashtags").Option("query", query).Switch("allTags", allTags);
+    public static OneMoreCommand SearchHashtags(string query, bool allTags = false,
+        string? notebook = null, string? section = null, string? page = null) =>
+        new OneMoreCommand("SearchHashtags")
+            .Option("notebook", notebook).Option("section", section).Option("page", page)
+            .Option("query", query).Switch("allTags", allTags);
+
+    public static OneMoreCommand SearchTitles(string query, string? notebook = null) =>
+        new OneMoreCommand("SearchTitles").Option("query", query).Option("notebook", notebook);
+
+    public static OneMoreCommand Sync(string notebook) =>
+        new OneMoreCommand("Sync").Option("notebook", notebook);
 
     public static OneMoreCommand PutPage(string? notebook, string? section, string? page, string infile, bool force = true) =>
         new OneMoreCommand("PutPage")

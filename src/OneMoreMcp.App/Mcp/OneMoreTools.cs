@@ -59,23 +59,43 @@ public sealed class OneMoreTools
     }
 
     [McpServerTool(Name = "search")]
-    [Description("Search OneNote for pages matching a query. Returns matching hierarchy nodes (markdown tree, or raw XML).")]
+    [Description("Full-text search a notebook for pages matching a query, optionally scoped to a section/page. Returns matching page paths (markdown) or raw XML.")]
     public async Task<string> Search(
         [Description("The search query.")] string query,
+        [Description("Notebook to search.")] string notebook,
+        [Description("Section to scope to (optional).")] string? section = null,
+        [Description("Page to scope to (optional).")] string? page = null,
         [Description("Output format: 'markdown' (default) or 'xml'.")] string? format = null,
         CancellationToken cancellationToken = default)
     {
-        var xml = await ReadContent(OneMoreCommand.Search(query), cancellationToken);
-        return AsXml(format) ? xml : OneNoteContent.HierarchyToMarkdown(xml);
+        if (string.IsNullOrWhiteSpace(notebook))
+            throw new ArgumentException("A notebook is required for search.", nameof(notebook));
+        var xml = await ReadContent(OneMoreCommand.Search(query, notebook, section, page), cancellationToken);
+        return AsXml(format) ? xml : OneNoteContent.SearchResultsToMarkdown(xml);
+    }
+
+    [McpServerTool(Name = "search_titles")]
+    [Description("Search page TITLES across a notebook — faster and more precise than full-text search for finding a page by name. Returns matching page paths (markdown) or raw XML.")]
+    public async Task<string> SearchTitles(
+        [Description("The title query.")] string query,
+        [Description("Notebook to search. Omit to search all loaded notebooks.")] string? notebook = null,
+        [Description("Output format: 'markdown' (default) or 'xml'.")] string? format = null,
+        CancellationToken cancellationToken = default)
+    {
+        var xml = await ReadContent(OneMoreCommand.SearchTitles(query, notebook), cancellationToken);
+        return AsXml(format) ? xml : OneNoteContent.SearchResultsToMarkdown(xml);
     }
 
     [McpServerTool(Name = "search_hashtags")]
-    [Description("Search OneNote hashtags. Returns matching results as raw XML.")]
+    [Description("Search OneNote hashtags, optionally scoped to a notebook/section/page. Returns matching results as raw XML.")]
     public async Task<string> SearchHashtags(
         [Description("The hashtag query.")] string query,
         [Description("Require all tags to match (AND) rather than any (OR).")] bool allTags = false,
+        [Description("Notebook to scope to (optional).")] string? notebook = null,
+        [Description("Section to scope to (optional).")] string? section = null,
+        [Description("Page to scope to (optional).")] string? page = null,
         CancellationToken cancellationToken = default) =>
-        await ReadContent(OneMoreCommand.SearchHashtags(query, allTags), cancellationToken);
+        await ReadContent(OneMoreCommand.SearchHashtags(query, allTags, notebook, section, page), cancellationToken);
 
     // ---------------- Append (ungated, token-free) ----------------
 
@@ -186,6 +206,18 @@ public sealed class OneMoreTools
         return $"Exported to {outpath} ({format}).";
     }
 
+    [McpServerTool(Name = "sync")]
+    [Description("Sync a notebook's pending changes to storage, ensuring recent edits are flushed and visible to subsequent reads. Always available.")]
+    public async Task<string> Sync(
+        [Description("Notebook name to sync.")] string notebook,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(notebook))
+            throw new ArgumentException("A notebook is required to sync.", nameof(notebook));
+        var output = await RunChecked(OneMoreCommand.Sync(notebook), cancellationToken);
+        return string.IsNullOrWhiteSpace(output) ? $"Synced '{notebook}'." : output.Trim();
+    }
+
     [McpServerTool(Name = "goto")]
     [Description("Navigate OneNote to a page (and optionally an object within it). Read-only navigation; always available.")]
     public async Task<string> Goto(
@@ -282,6 +314,17 @@ public sealed class OneMoreTools
             var output = await RunChecked(OneMoreCommand.PutPage(notebook, section, page, temp, force: true), cancellationToken);
             if (!string.IsNullOrWhiteSpace(output))
                 throw new InvalidOperationException($"OneMore PutPage did not apply the change: {output.Trim()}");
+
+            // Best-effort flush so the write reliably lands / is visible on the next read.
+            if (_options.CurrentValue.SyncAfterWrite && !string.IsNullOrWhiteSpace(notebook))
+            {
+                try { await RunChecked(OneMoreCommand.Sync(notebook), cancellationToken); }
+                // Cancellation isn't a sync failure — let it propagate; only warn on real errors.
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _log.LogWarning(ex, "Auto-sync after write failed for notebook '{Notebook}'.", notebook);
+                }
+            }
         }
         finally
         {

@@ -54,6 +54,24 @@ public class OneNoteContentTests
     }
 
     [Fact]
+    public void SearchResultsToMarkdown_lists_page_paths()
+    {
+        const string results =
+            "<Results query=\"Lorem\" count=\"2\">" +
+            "<Page id=\"{1}\" path=\"testnotebook/New Section 1/Lorem ipsum\" />" +
+            "<Page id=\"{2}\" path=\"Work/Ideas/Roadmap\" /></Results>";
+        var md = OneNoteContent.SearchResultsToMarkdown(results);
+        Assert.Equal("- testnotebook/New Section 1/Lorem ipsum\n- Work/Ideas/Roadmap", md.Replace("\r\n", "\n"));
+    }
+
+    [Fact]
+    public void SearchResultsToMarkdown_reports_no_matches_for_empty_results()
+    {
+        Assert.Equal("*(no matching pages)*",
+            OneNoteContent.SearchResultsToMarkdown("<Results query=\"x\" count=\"0\" />"));
+    }
+
+    [Fact]
     public void StripHtml_turns_breaks_into_spaces_and_decodes_entities()
     {
         Assert.Equal("a b", OneNoteContent.StripHtml("a<br/>b"));

@@ -44,6 +44,13 @@ public sealed class OneMoreMcpOptions
     public string DefaultFormat { get; set; } = "markdown";
 
     /// <summary>
+    /// After a content write (append / create-or-update), sync the affected notebook to storage so the
+    /// change reliably lands and is visible to a subsequent read. On by default. Best-effort — a failed
+    /// sync is logged, not surfaced as a write failure.
+    /// </summary>
+    public bool SyncAfterWrite { get; set; } = true;
+
+    /// <summary>
     /// How long a single CLI invocation may run before it's killed. OneMore operations spanning many
     /// pages can take a minute or two, so this is generous by default.
     /// </summary>

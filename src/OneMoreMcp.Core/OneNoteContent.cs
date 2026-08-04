@@ -60,6 +60,33 @@ public static partial class OneNoteContent
         return text.Length == 0 ? "*(no notebooks/sections/pages found)*" : text;
     }
 
+    /// <summary>
+    /// Renders Search / SearchTitles output (a <c>&lt;Results&gt;</c> document of <c>&lt;Page&gt;</c>
+    /// elements) as a Markdown list of page paths. Falls back to the raw input if it can't be parsed,
+    /// and to a friendly note when the query matched nothing.
+    /// </summary>
+    public static string SearchResultsToMarkdown(string resultsXml)
+    {
+        XDocument doc;
+        try { doc = XDocument.Parse(resultsXml); }
+        catch (System.Xml.XmlException) { return resultsXml; }
+
+        var pages = doc.Descendants().Where(e => e.Name.LocalName == "Page").ToList();
+        if (pages.Count == 0)
+            return doc.Root?.Name.LocalName == "Results" ? "*(no matching pages)*" : resultsXml;
+
+        var sb = new StringBuilder();
+        foreach (var page in pages)
+        {
+            var label = (string?)page.Attribute("path")
+                ?? (string?)page.Attribute("name")
+                ?? (string?)page.Attribute("id")
+                ?? "Page";
+            sb.Append("- ").AppendLine(label.Trim());
+        }
+        return sb.ToString().TrimEnd();
+    }
+
     private static void WriteHierarchy(XElement element, StringBuilder sb, int depth)
     {
         var local = element.Name.LocalName;

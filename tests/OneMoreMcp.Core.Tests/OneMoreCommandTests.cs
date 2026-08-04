@@ -47,6 +47,28 @@ public class OneMoreCommandTests
     }
 
     [Fact]
+    public void Search_includes_required_notebook_and_optional_scope()
+    {
+        var argv = OneMoreCommand.Search("meeting", notebook: "Work", section: "Ideas").Build();
+        Assert.Equal(new[] { "Search", "--notebook", "Work", "--section", "Ideas", "--query", "meeting" }, argv);
+    }
+
+    [Fact]
+    public void SearchTitles_includes_query_and_optional_notebook()
+    {
+        Assert.Equal(
+            new[] { "SearchTitles", "--query", "agenda", "--notebook", "Work" },
+            OneMoreCommand.SearchTitles("agenda", notebook: "Work").Build());
+        Assert.Equal(new[] { "SearchTitles", "--query", "agenda" }, OneMoreCommand.SearchTitles("agenda").Build());
+    }
+
+    [Fact]
+    public void Sync_targets_the_notebook()
+    {
+        Assert.Equal(new[] { "Sync", "--notebook", "Work" }, OneMoreCommand.Sync("Work").Build());
+    }
+
+    [Fact]
     public void SearchHashtags_allTags_adds_the_switch()
     {
         Assert.Equal(

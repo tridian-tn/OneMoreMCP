@@ -96,6 +96,9 @@ Edit it (tray menu → **Open configuration…**). `CliPath`, `AllowWrites`, `De
   `append_to_page` tool is exempt — see [Appending vs. writing](#appending-vs-writing).
 - **DefaultFormat**: how read tools return page/hierarchy content — `markdown` (default, compact) or
   `xml` (raw OneNote XML). Each read tool can override this per call.
+- **SyncAfterWrite**: after a content write (`append_to_page` / `create_or_update_page`), sync the
+  affected notebook to storage so the change reliably lands and is visible on the next read. On by
+  default; best-effort (a failed sync is logged, not surfaced as a write failure).
 - **CommandTimeoutSeconds**: how long a single CLI call may run before it's cancelled. OneMore
   operations spanning many pages can take a minute or two, so the default is generous (150s).
 - **ExportRoot**: optional folder that `export` output paths must stay within. Blank allows any path.
@@ -221,8 +224,10 @@ OneMoreMcp.exe --disable-autostart
 | --- | --- | --- |
 | `list_hierarchy` | Notebook/section/page tree (markdown or raw XML). | — |
 | `get_page` | A page's content by notebook+section+page, or `current`; markdown (default) or XML. | — |
-| `search` | Search OneNote for pages matching a query. | — |
-| `search_hashtags` | Search OneNote hashtags. | — |
+| `search` | Full-text search a **notebook** (required) for pages matching a query; optional section/page scope. | — |
+| `search_titles` | Search page **titles** across a notebook — quicker/more precise for finding a page by name. | — |
+| `search_hashtags` | Search OneNote hashtags; optional notebook/section/page scope. | — |
+| `sync` | Sync a notebook's pending changes to storage (flush recent edits). | — |
 | `append_to_page` | **Append** text (markdown/html/plain) to a page. Fetches, adds, writes back — never sends the page's existing content to the model, never overwrites. | **ungated** |
 | `create_or_update_page` | Create/overwrite a page from raw OneNote page XML (as `get_page` format=xml). | gated |
 | `add_hashtag` / `remove_hashtag` | Add/remove hashtags on the current page(s). | gated |
@@ -334,8 +339,11 @@ The server is a **process orchestrator**: each tool builds a `OneMoreCli.exe` in
 | --- | --- |
 | `list_hierarchy` | `GetHierarchy [--notebook] [--section] [--books]` (XML; `--books` yields JSON) |
 | `get_page` | `GetPage --notebook --section --page` (all three required), or `--current` |
-| `search` / `search_hashtags` | `Search --query` / `SearchHashtags --query [--allTags]` |
-| `append_to_page` | `GetPage` (raw) → local append → `PutPage --infile <temp> --force` |
+| `search` | `Search --notebook --query [--section] [--page]` (results rendered as page paths) |
+| `search_titles` | `SearchTitles --query [--notebook]` (page paths) |
+| `search_hashtags` | `SearchHashtags --query [--allTags] [--notebook] [--section] [--page]` |
+| `sync` | `Sync --notebook` |
+| `append_to_page` | `GetPage` (raw) → local append → `PutPage --infile <temp> --force` → `Sync` (if `SyncAfterWrite`) |
 | `create_or_update_page` | `PutPage [--notebook] [--section] [--page] --infile <temp> --force` |
 | `add_hashtag` / `remove_hashtag` | `AddHashtag --tags` / `RemoveHashtag --tags` |
 | `insert_toc` | `InsertToc [--page] [--refresh]` |

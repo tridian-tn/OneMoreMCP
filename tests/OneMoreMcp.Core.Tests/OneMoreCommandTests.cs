@@ -69,6 +69,32 @@ public class OneMoreCommandTests
     }
 
     [Fact]
+    public void Archive_carries_notebook_outfile_and_optional_section()
+    {
+        Assert.Equal(
+            new[] { "Archive", "--notebook", "Work", "--section", "Ideas", "--outfile", @"C:\b\w.zip" },
+            OneMoreCommand.Archive("Work", "Ideas", @"C:\b\w.zip").Build());
+        Assert.Equal(
+            new[] { "Archive", "--notebook", "Work", "--outfile", @"C:\b\w.zip" },
+            OneMoreCommand.Archive("Work", null, @"C:\b\w.zip").Build());
+    }
+
+    [Fact]
+    public void Diagnostics_adds_windows_switch_only_when_requested()
+    {
+        Assert.Equal(new[] { "Diagnostics" }, OneMoreCommand.Diagnostics().Build());
+        Assert.Equal(new[] { "Diagnostics", "--windows" }, OneMoreCommand.Diagnostics(includeWindows: true).Build());
+    }
+
+    [Fact]
+    public void Cleanup_scopes_to_notebook_section_page()
+    {
+        Assert.Equal(
+            new[] { "RemoveEmpty", "--notebook", "Work", "--section", "Ideas" },
+            OneMoreCommand.Cleanup("RemoveEmpty", "Work", "Ideas").Build());
+    }
+
+    [Fact]
     public void SearchHashtags_allTags_adds_the_switch()
     {
         Assert.Equal(

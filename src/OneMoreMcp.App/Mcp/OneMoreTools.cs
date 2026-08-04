@@ -230,17 +230,44 @@ public sealed class OneMoreTools
     }
 
     [McpServerTool(Name = "run_cleanup")]
-    [Description("Run a page-maintenance operation on the current page. Requires writes to be enabled. "
-        + "operation: applyStyles, clearBackground, removeEmpty, trim, recalculate, removeAuthors, removeInk, removeCitations, removeTags, restoreAutosize.")]
+    [Description("Run a page-maintenance operation on a notebook (optionally scoped to a section/page). Requires writes to be enabled. "
+        + "operation: applyStyles, clearBackground, removeEmpty, trim, recalculate, removeAuthors, removeInk, removeCitations, "
+        + "removeTags, restoreAutosize, enableSpellCheck, disableSpellCheck, embed.")]
     public async Task<string> RunCleanup(
         [Description("The maintenance operation to run (see the list in this tool's description).")] string operation,
+        [Description("Notebook to act on.")] string notebook,
+        [Description("Section to scope to (optional).")] string? section = null,
+        [Description("Page to scope to (optional).")] string? page = null,
         CancellationToken cancellationToken = default)
     {
         EnsureWritesAllowed();
-        var command = ResolveCleanup(operation);
+        if (string.IsNullOrWhiteSpace(notebook))
+            throw new ArgumentException("A notebook is required for cleanup operations.", nameof(notebook));
+        var command = ResolveCleanup(operation, notebook, section, page);
         await RunChecked(command, cancellationToken);
         return $"Ran {command.Name}.";
     }
+
+    [McpServerTool(Name = "archive")]
+    [Description("Archive a notebook (or a section) to a .zip backup file. Requires writes to be enabled.")]
+    public async Task<string> Archive(
+        [Description("Notebook to archive.")] string notebook,
+        [Description("Destination .zip file path.")] string outfile,
+        [Description("Section to archive (optional; omit to archive the whole notebook).")] string? section = null,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureWritesAllowed();
+        EnsureWithinExportRoot(outfile);
+        await RunChecked(OneMoreCommand.Archive(notebook, section, outfile), cancellationToken);
+        return $"Archived to {outfile}.";
+    }
+
+    [McpServerTool(Name = "diagnostics")]
+    [Description("Dump diagnostic information about OneNote and OneMore (connectivity, versions, paths, etc.). Read-only.")]
+    public async Task<string> Diagnostics(
+        [Description("Include window/layout details.")] bool includeWindows = false,
+        CancellationToken cancellationToken = default) =>
+        await ReadContent(OneMoreCommand.Diagnostics(includeWindows), cancellationToken);
 
     // ---------------- Helpers ----------------
 
@@ -380,23 +407,34 @@ public sealed class OneMoreTools
             _ => throw new ArgumentException($"Unknown format '{format}'. Use 'markdown', 'html', or 'plain'."),
         };
 
-    private static OneMoreCommand ResolveCleanup(string operation) =>
-        operation.Trim().ToLowerInvariant() switch
+    private static OneMoreCommand ResolveCleanup(string operation, string? notebook, string? section, string? page)
+    {
+        var name = operation.Trim().ToLowerInvariant() switch
         {
-            "applystyles" => OneMoreCommand.Simple("ApplyStyles"),
-            "clearbackground" => OneMoreCommand.Simple("ClearBackground"),
-            "removeempty" => OneMoreCommand.Simple("RemoveEmpty"),
-            "trim" => OneMoreCommand.Simple("Trim"),
-            "recalculate" => OneMoreCommand.Simple("Recalculate"),
-            "removeauthors" => OneMoreCommand.Simple("RemoveAuthors"),
-            "removeink" => OneMoreCommand.Simple("RemoveInk"),
-            "removecitations" => OneMoreCommand.Simple("RemoveCitations"),
-            "removetags" => OneMoreCommand.Simple("RemoveTags"),
-            "restoreautosize" => OneMoreCommand.Simple("RestoreAutosize"),
+            "applystyles" => "ApplyStyles",
+            "clearbackground" => "ClearBackground",
+            "removeempty" => "RemoveEmpty",
+            "trim" => "Trim",
+            "recalculate" => "Recalculate",
+            "removeauthors" => "RemoveAuthors",
+            "removeink" => "RemoveInk",
+            "removecitations" => "RemoveCitations",
+            "removetags" => "RemoveTags",
+            "restoreautosize" => "RestoreAutosize",
+            "enablespellcheck" => "EnableSpellCheck",
+            "disablespellcheck" => "DisableSpellCheck",
+            "embed" => "Embed",
             _ => throw new ArgumentException(
                 $"Unknown cleanup operation '{operation}'. Valid: applyStyles, clearBackground, removeEmpty, trim, " +
-                "recalculate, removeAuthors, removeInk, removeCitations, removeTags, restoreAutosize."),
+                "recalculate, removeAuthors, removeInk, removeCitations, removeTags, restoreAutosize, " +
+                "enableSpellCheck, disableSpellCheck, embed."),
         };
+
+        var command = OneMoreCommand.Cleanup(name, notebook, section, page);
+        // Embed's --refresh switch is required — it's the operation trigger.
+        if (name == "Embed") command.Switch("refresh", true);
+        return command;
+    }
 
     private static string Trim(string stderr, string stdout)
     {

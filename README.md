@@ -233,8 +233,10 @@ OneMoreMcp.exe --disable-autostart
 | `add_hashtag` / `remove_hashtag` | Add/remove hashtags on the current page(s). | gated |
 | `insert_toc` | Insert or refresh a table of contents. | gated |
 | `export` | Export pages to a folder (HTML/PDF/Word/XML/Markdown/OneNote); confined to `ExportRoot` if set. | gated |
+| `archive` | Archive a notebook (or section) to a `.zip`; confined to `ExportRoot` if set. | gated |
 | `goto` | Navigate OneNote to a page/object. | — |
-| `run_cleanup` | Page maintenance (`applyStyles`, `removeEmpty`, `trim`, `recalculate`, …) via an `operation` argument. | gated |
+| `diagnostics` | Dump OneNote/OneMore diagnostic info (connectivity, versions, paths). | — |
+| `run_cleanup` | Page maintenance on a notebook (`applyStyles`, `removeEmpty`, `trim`, `recalculate`, `enableSpellCheck`/`disableSpellCheck`, `embed`, …) via an `operation` argument. | gated |
 
 ## Reading & output formats
 
@@ -348,8 +350,10 @@ The server is a **process orchestrator**: each tool builds a `OneMoreCli.exe` in
 | `add_hashtag` / `remove_hashtag` | `AddHashtag --tags` / `RemoveHashtag --tags` |
 | `insert_toc` | `InsertToc [--page] [--refresh]` |
 | `export` | `Export --outpath --format [--pageId] [--backup]` |
+| `archive` | `Archive --notebook --outfile [--section]` |
 | `goto` | `Goto --pageId [--objectId]` |
-| `run_cleanup` | `ApplyStyles` / `RemoveEmpty` / `Trim` / `Recalculate` / … |
+| `diagnostics` | `Diagnostics [--windows]` |
+| `run_cleanup` | `<op> --notebook [--section] [--page]` — ApplyStyles / RemoveEmpty / Trim / Embed --refresh / … (all require `--notebook`) |
 
 > `PutPage --force` overwrites the page identified by the `ID` carried in the supplied XML. The exact
 > targeting of `--section`/`--page` may need tuning against your OneMore version — see the tool

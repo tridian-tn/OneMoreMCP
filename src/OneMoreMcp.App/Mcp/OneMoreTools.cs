@@ -1,5 +1,7 @@
 using System.ComponentModel;
 using System.Text;
+using System.Xml;
+using System.Xml.Linq;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ModelContextProtocol.Server;
@@ -38,7 +40,7 @@ public sealed class OneMoreTools
         [Description("Output format: 'markdown' (default) or 'xml'.")] string? format = null,
         CancellationToken cancellationToken = default)
     {
-        var xml = await ReadStdout(OneMoreCommand.GetHierarchy(notebook, section, booksOnly), cancellationToken);
+        var xml = await ReadContent(OneMoreCommand.GetHierarchy(notebook, section, booksOnly), cancellationToken);
         return AsXml(format) ? xml : OneNoteContent.HierarchyToMarkdown(xml);
     }
 
@@ -63,7 +65,7 @@ public sealed class OneMoreTools
         [Description("Output format: 'markdown' (default) or 'xml'.")] string? format = null,
         CancellationToken cancellationToken = default)
     {
-        var xml = await ReadStdout(OneMoreCommand.Search(query), cancellationToken);
+        var xml = await ReadContent(OneMoreCommand.Search(query), cancellationToken);
         return AsXml(format) ? xml : OneNoteContent.HierarchyToMarkdown(xml);
     }
 
@@ -73,7 +75,7 @@ public sealed class OneMoreTools
         [Description("The hashtag query.")] string query,
         [Description("Require all tags to match (AND) rather than any (OR).")] bool allTags = false,
         CancellationToken cancellationToken = default) =>
-        await ReadStdout(OneMoreCommand.SearchHashtags(query, allTags), cancellationToken);
+        await ReadContent(OneMoreCommand.SearchHashtags(query, allTags), cancellationToken);
 
     // ---------------- Append (ungated, token-free) ----------------
 
@@ -120,6 +122,9 @@ public sealed class OneMoreTools
         EnsureWritesAllowed();
         if (string.IsNullOrWhiteSpace(pageXml))
             throw new ArgumentException("The page XML is empty.", nameof(pageXml));
+        // Fail early on malformed XML with a clear message (rather than a vaguer downstream CLI error).
+        try { XDocument.Parse(pageXml); }
+        catch (XmlException ex) { throw new ArgumentException("The page XML could not be parsed.", nameof(pageXml), ex); }
         await PutPageXml(pageXml, notebook, section, page, cancellationToken);
         return "Page written.";
     }
@@ -134,7 +139,7 @@ public sealed class OneMoreTools
         CancellationToken cancellationToken = default)
     {
         EnsureWritesAllowed();
-        await ReadStdout(OneMoreCommand.AddHashtag(tags, notebook, section, page), cancellationToken);
+        await RunChecked(OneMoreCommand.AddHashtag(tags, notebook, section, page), cancellationToken);
         return "Hashtag(s) added.";
     }
 
@@ -148,7 +153,7 @@ public sealed class OneMoreTools
         CancellationToken cancellationToken = default)
     {
         EnsureWritesAllowed();
-        await ReadStdout(OneMoreCommand.RemoveHashtag(tags, notebook, section, page), cancellationToken);
+        await RunChecked(OneMoreCommand.RemoveHashtag(tags, notebook, section, page), cancellationToken);
         return "Hashtag(s) removed.";
     }
 
@@ -162,7 +167,7 @@ public sealed class OneMoreTools
         CancellationToken cancellationToken = default)
     {
         EnsureWritesAllowed();
-        await ReadStdout(OneMoreCommand.InsertToc(notebook, section, page, refresh), cancellationToken);
+        await RunChecked(OneMoreCommand.InsertToc(notebook, section, page, refresh), cancellationToken);
         return refresh ? "Table of contents refreshed." : "Table of contents inserted.";
     }
 
@@ -177,7 +182,7 @@ public sealed class OneMoreTools
     {
         EnsureWritesAllowed();
         EnsureWithinExportRoot(outpath);
-        await ReadStdout(OneMoreCommand.Export(outpath, format, pageId, backup), cancellationToken);
+        await RunChecked(OneMoreCommand.Export(outpath, format, pageId, backup), cancellationToken);
         return $"Exported to {outpath} ({format}).";
     }
 
@@ -188,7 +193,7 @@ public sealed class OneMoreTools
         [Description("An object ID within the page to focus.")] string? objectId = null,
         CancellationToken cancellationToken = default)
     {
-        await ReadStdout(OneMoreCommand.Goto(pageId, objectId), cancellationToken);
+        await RunChecked(OneMoreCommand.Goto(pageId, objectId), cancellationToken);
         return "Navigated.";
     }
 
@@ -201,41 +206,80 @@ public sealed class OneMoreTools
     {
         EnsureWritesAllowed();
         var command = ResolveCleanup(operation);
-        await ReadStdout(command, cancellationToken);
+        await RunChecked(command, cancellationToken);
         return $"Ran {command.Name}.";
     }
 
     // ---------------- Helpers ----------------
 
-    /// <summary>Runs a command and returns stdout, turning a non-zero exit into an actionable error.</summary>
-    private async Task<string> ReadStdout(OneMoreCommand command, CancellationToken cancellationToken)
+    /// <summary>Throws an actionable error when the CLI reported a non-zero exit.</summary>
+    private static void EnsureOk(OneMoreCommand command, CliResult result)
     {
-        var result = await _runner.RunAsync(command, cancellationToken);
         if (!result.Ok)
             throw new InvalidOperationException(
                 $"OneMore CLI '{command.Name}' failed (exit {result.ExitCode}): {Trim(result.StdErr, result.StdOut)}");
+    }
+
+    /// <summary>Runs a command, throws on a non-zero exit, and returns stdout. Used by write/action tools.</summary>
+    private async Task<string> RunChecked(OneMoreCommand command, CancellationToken cancellationToken)
+    {
+        var result = await _runner.RunAsync(command, cancellationToken);
+        EnsureOk(command, result);
         return result.StdOut;
+    }
+
+    /// <summary>
+    /// Runs a content-producing command with <c>--output &lt;temp&gt;</c> and returns the file's contents.
+    /// The CLI writes output straight to the file, avoiding the stdout/console-encoding corruption of
+    /// non-ASCII page content that can occur when capturing piped output. Requires a OneMore build with
+    /// <c>--output</c> support.
+    /// </summary>
+    private async Task<string> ReadContent(OneMoreCommand command, CancellationToken cancellationToken)
+    {
+        var temp = NewTempFile();
+        try
+        {
+            var result = await _runner.RunAsync(command.Output(temp), cancellationToken);
+            EnsureOk(command, result);
+
+            if (!File.Exists(temp))
+                return result.StdOut;
+
+            var length = new FileInfo(temp).Length;
+            if (length > MaxContentBytes)
+                throw new InvalidOperationException(
+                    $"OneMore CLI '{command.Name}' produced {length / (1024 * 1024)} MB of output, " +
+                    $"exceeding the {MaxContentBytes / (1024 * 1024)} MB limit.");
+
+            // The CLI exits 0 even on errors, printing the diagnostic to stdout and leaving the file
+            // empty. A real content read is never empty, so an empty file means fall back to stdout.
+            var content = await File.ReadAllTextAsync(temp, cancellationToken);
+            return string.IsNullOrEmpty(content) ? result.StdOut : content;
+        }
+        finally
+        {
+            try { File.Delete(temp); } catch { /* best effort */ }
+        }
     }
 
     private async Task<string> ReadPageXml(string? notebook, string? section, string? page, bool current, CancellationToken cancellationToken)
     {
         if (!current && (string.IsNullOrWhiteSpace(notebook) || string.IsNullOrWhiteSpace(section) || string.IsNullOrWhiteSpace(page)))
             throw new ArgumentException("Specify notebook, section, and page together — or set current=true.");
-        return await ReadStdout(OneMoreCommand.GetPage(notebook, section, page, current), cancellationToken);
+        return await ReadContent(OneMoreCommand.GetPage(notebook, section, page, current), cancellationToken);
     }
 
     /// <summary>Writes page XML to a temp file and hands it to PutPage --force, cleaning up afterwards.</summary>
     private async Task PutPageXml(string pageXml, string? notebook, string? section, string? page, CancellationToken cancellationToken)
     {
-        // Strip attributes PutPage's schema rejects (e.g. omHash) so the write isn't silently discarded.
-        var sanitised = OneNotePage.PrepareForPut(pageXml);
-        var temp = Path.Combine(Path.GetTempPath(), $"onemoremcp_{Guid.NewGuid():N}.xml");
-        await File.WriteAllTextAsync(temp, sanitised, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
+        // The XML is sent as-is (omHash intact): PutPage accepts it and uses omHash for change detection.
+        var temp = NewTempFile();
+        await File.WriteAllTextAsync(temp, pageXml, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
         try
         {
             // PutPage prints nothing on success but reports schema/other errors on stdout while still
             // exiting 0, so treat any output as a failure rather than falsely reporting success.
-            var output = await ReadStdout(OneMoreCommand.PutPage(notebook, section, page, temp, force: true), cancellationToken);
+            var output = await RunChecked(OneMoreCommand.PutPage(notebook, section, page, temp, force: true), cancellationToken);
             if (!string.IsNullOrWhiteSpace(output))
                 throw new InvalidOperationException($"OneMore PutPage did not apply the change: {output.Trim()}");
         }
@@ -244,6 +288,13 @@ public sealed class OneMoreTools
             try { File.Delete(temp); } catch { /* best effort */ }
         }
     }
+
+    // Upper bound on a single read's content, mirroring the runner's stdout cap so the --output file
+    // read can't load an unbounded payload into memory.
+    private const long MaxContentBytes = 64L * 1024 * 1024;
+
+    private static string NewTempFile() =>
+        Path.Combine(Path.GetTempPath(), $"onemoremcp_{Guid.NewGuid():N}.xml");
 
     private void EnsureWritesAllowed()
     {

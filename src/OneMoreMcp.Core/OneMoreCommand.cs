@@ -33,23 +33,22 @@ public sealed class OneMoreCommand
     }
 
     /// <summary>
-    /// Adds a <c>--flag yes</c> when <paramref name="present"/> is true; otherwise a no-op. The OneMore
-    /// CLI models booleans as <c>&lt;yes/no&gt;</c> options (default <c>no</c>), not bare switches, so a
-    /// value must be supplied — a bare <c>--flag</c> is treated as absent.
+    /// Adds a bare <c>--flag</c> switch when <paramref name="present"/> is true; otherwise a no-op.
+    /// The OneMore CLI (7.3.0+) models booleans as PowerShell-style switches: presence enables them,
+    /// absence uses the default.
     /// </summary>
     public OneMoreCommand Switch(string flag, bool present)
     {
-        if (present) { _args.Add("--" + flag); _args.Add("yes"); }
+        if (present) _args.Add("--" + flag);
         return this;
     }
 
-    /// <summary>Adds <c>--flag yes|no</c> unconditionally — for booleans the CLI marks as required.</summary>
-    public OneMoreCommand Bool(string flag, bool value)
-    {
-        _args.Add("--" + flag);
-        _args.Add(value ? "yes" : "no");
-        return this;
-    }
+    /// <summary>
+    /// Adds the CLI's global <c>--output &lt;file&gt;</c> option, directing command output to a file
+    /// instead of stdout. Avoids console/shell encoding corruption of non-ASCII page content.
+    /// Requires a OneMore build that supports <c>--output</c> (added in the CLI after 7.2.0).
+    /// </summary>
+    public OneMoreCommand Output(string? path) => Option("output", path);
 
     /// <summary>The full argument vector: the command name followed by its options, in order.</summary>
     public IReadOnlyList<string> Build()
@@ -94,10 +93,11 @@ public sealed class OneMoreCommand
         new OneMoreCommand("RemoveHashtag")
             .Option("notebook", notebook).Option("section", section).Option("page", page).Option("tags", tags);
 
-    // InsertToc requires --notebook, --section, --page and a --refresh yes/no value.
+    // InsertToc requires --notebook, --section, --page; --refresh is a switch (present = refresh an
+    // existing TOC, absent = build a new one).
     public static OneMoreCommand InsertToc(string? notebook, string? section, string? page, bool refresh) =>
         new OneMoreCommand("InsertToc")
-            .Option("notebook", notebook).Option("section", section).Option("page", page).Bool("refresh", refresh);
+            .Option("notebook", notebook).Option("section", section).Option("page", page).Switch("refresh", refresh);
 
     public static OneMoreCommand Export(string outpath, string format, string? pageId = null, bool backup = false) =>
         new OneMoreCommand("Export").Option("outpath", outpath).Option("format", format).Option("pageId", pageId).Switch("backup", backup);

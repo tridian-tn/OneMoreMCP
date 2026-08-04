@@ -9,7 +9,7 @@ public class OneMoreCommandTests
     public void GetHierarchy_includes_only_supplied_options()
     {
         var argv = OneMoreCommand.GetHierarchy(notebook: "Work", section: null, books: true).Build();
-        Assert.Equal(new[] { "GetHierarchy", "--notebook", "Work", "--books", "yes" }, argv);
+        Assert.Equal(new[] { "GetHierarchy", "--notebook", "Work", "--books" }, argv);
     }
 
     [Fact]
@@ -22,7 +22,7 @@ public class OneMoreCommandTests
     public void GetPage_current_omits_notebook_section_and_page()
     {
         var argv = OneMoreCommand.GetPage(notebook: null, section: null, page: null, current: true).Build();
-        Assert.Equal(new[] { "GetPage", "--current", "yes" }, argv);
+        Assert.Equal(new[] { "GetPage", "--current" }, argv);
     }
 
     [Fact]
@@ -36,7 +36,7 @@ public class OneMoreCommandTests
     public void PutPage_forces_by_default_and_carries_the_infile()
     {
         var argv = OneMoreCommand.PutPage(notebook: "B", section: "S", page: null, infile: @"C:\t\p.xml").Build();
-        Assert.Equal(new[] { "PutPage", "--notebook", "B", "--section", "S", "--infile", @"C:\t\p.xml", "--force", "yes" }, argv);
+        Assert.Equal(new[] { "PutPage", "--notebook", "B", "--section", "S", "--infile", @"C:\t\p.xml", "--force" }, argv);
     }
 
     [Fact]
@@ -50,18 +50,18 @@ public class OneMoreCommandTests
     public void SearchHashtags_allTags_adds_the_switch()
     {
         Assert.Equal(
-            new[] { "SearchHashtags", "--query", "#a #b", "--allTags", "yes" },
+            new[] { "SearchHashtags", "--query", "#a #b", "--allTags" },
             OneMoreCommand.SearchHashtags("#a #b", allTags: true).Build());
     }
 
     [Fact]
-    public void InsertToc_always_emits_refresh_yes_or_no()
+    public void InsertToc_includes_refresh_switch_only_when_true()
     {
         Assert.Equal(
-            new[] { "InsertToc", "--notebook", "B", "--section", "S", "--page", "P", "--refresh", "no" },
+            new[] { "InsertToc", "--notebook", "B", "--section", "S", "--page", "P" },
             OneMoreCommand.InsertToc("B", "S", "P", refresh: false).Build());
         Assert.Equal(
-            new[] { "InsertToc", "--notebook", "B", "--section", "S", "--page", "P", "--refresh", "yes" },
+            new[] { "InsertToc", "--notebook", "B", "--section", "S", "--page", "P", "--refresh" },
             OneMoreCommand.InsertToc("B", "S", "P", refresh: true).Build());
     }
 
@@ -70,6 +70,23 @@ public class OneMoreCommandTests
     {
         var argv = OneMoreCommand.Export(outpath: @"C:\out", format: "PDF", pageId: "{123}").Build();
         Assert.Equal(new[] { "Export", "--outpath", @"C:\out", "--format", "PDF", "--pageId", "{123}" }, argv);
+    }
+
+    [Fact]
+    public void Export_backup_adds_the_bare_switch()
+    {
+        var argv = OneMoreCommand.Export(outpath: @"C:\out", format: "PDF", backup: true).Build();
+        Assert.Equal(new[] { "Export", "--outpath", @"C:\out", "--format", "PDF", "--backup" }, argv);
+    }
+
+    [Fact]
+    public void Output_appends_the_global_output_option()
+    {
+        var argv = OneMoreCommand.GetPage(notebook: "N", section: "S", page: "P", current: false)
+            .Output(@"C:\tmp\o.xml").Build();
+        Assert.Equal(
+            new[] { "GetPage", "--notebook", "N", "--section", "S", "--page", "P", "--output", @"C:\tmp\o.xml" },
+            argv);
     }
 
     [Fact]

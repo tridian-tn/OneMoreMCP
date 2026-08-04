@@ -9,13 +9,13 @@ generating code.
 
 - **`src/OneMoreMcp.Core`** (`net10.0`) — the pure engine. **No UI, hosting, or Windows dependencies**,
   so it stays unit-testable. Holds `OneMoreCommand` (the CLI argument builder), `OneNoteContent`
-  (OneNote XML → Markdown projections), `PageAppender` (append text into page XML), `OneNotePage`
-  (`PrepareForPut` — strips write-rejected attributes), and `CliResult` / `CliException`.
+  (OneNote XML → Markdown projections), `PageAppender` (append text into page XML), and
+  `CliResult` / `CliException`.
 - **`src/OneMoreMcp.App`** (`net10.0-windows`) — WinForms tray icon + ASP.NET Core (Kestrel) host
   running the MCP server, plus `OneMoreCliRunner` (process orchestration), the MCP tools
   (`Mcp/OneMoreTools`), options, HTTPS/certificate handling, single-instance, and run-at-logon.
-- **`tests/OneMoreMcp.Core.Tests`** (`net10.0`, xUnit) — argument building, XML transforms, append and
-  sanitiser round-trips. **`tests/OneMoreMcp.App.Tests`** (`net10.0-windows`) — tool policy (write
+- **`tests/OneMoreMcp.Core.Tests`** (`net10.0`, xUnit) — argument building, XML transforms, and append
+  round-trips. **`tests/OneMoreMcp.App.Tests`** (`net10.0-windows`) — tool policy (write
   gating, the ungated append path, export confinement) via a fake runner.
 
 Keep `Core` free of UI/host/Windows references. New CLI-argument or XML behaviour belongs in `Core`,
@@ -26,17 +26,19 @@ with tests. The tray/host layer is a thin adapter.
 The real CLI diverges from its documentation in ways that silently break writes. These were verified
 against `OneMoreCli.exe` directly; **guard them, and flag any change that reintroduces them**:
 
-- **Boolean flags are `--flag <yes/no>` valued options, not bare switches.** Emit `--force yes`, not a
-  bare `--force` (which the CLI treats as absent). Use `OneMoreCommand.Switch` (adds `--flag yes` when
-  true) or `Bool` (always `--flag yes|no`, for required booleans like `InsertToc --refresh`). Never add
-  a bare `--flag`.
+- **Boolean flags are bare switches** (OneMore 7.3.0+): presence enables them, absence uses the default.
+  Emit `--force` (via `OneMoreCommand.Switch`, which adds `--flag` only when true), never `--force yes`.
+  (7.2.0 briefly required `--flag yes`; that's gone.)
 - **Supply every REQUIRED parameter.** `GetPage`/`PutPage` need `--notebook` + `--section` + `--page`
   (unless `--current`); `AddHashtag`/`RemoveHashtag`/`InsertToc` need `--notebook`. A missing required
   parameter makes the CLI drop into an **interactive prompt that re-prompts forever** with no console,
   emitting unbounded output. `OneMoreCliRunner` guards this (closes child stdin, caps captured output,
   kills on overflow) — do not remove that guard, and keep command factories complete.
-- **`PutPage` schema-rejects the `omHash` attribute** that `GetPage` emits. Always pass page XML through
-  `OneNotePage.PrepareForPut` before a write. Don't send raw `GetPage` output to `PutPage`.
+- **Read content via `--output <file>`, not stdout.** Content commands (`GetPage`, `GetHierarchy`,
+  `Search`, `SearchHashtags`) are run through `ReadContent`, which appends `--output <temp>` and reads
+  the file — the CLI's stdout capture corrupts non-ASCII content. Writes (`PutPage`, etc.) keep stdout
+  capture for success/error detection. Page XML is sent to `PutPage` **with `omHash` intact** (the CLI
+  accepts it and uses it for change detection); do not strip it.
 - **The CLI exits 0 even on errors** (the message goes to stdout). Do not gate success on the exit code
   alone: reads return stdout; `PutPage` prints nothing on success, so any non-empty `PutPage` output is
   treated as a failure. Preserve that check.

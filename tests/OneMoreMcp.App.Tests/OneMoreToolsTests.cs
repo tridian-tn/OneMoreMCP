@@ -20,9 +20,15 @@ public class OneMoreToolsTests
         "<one:OE><one:T><![CDATA[Existing]]></one:T></one:OE>" +
         "</one:OEChildren></one:Outline></one:Page>";
 
-    private static (OneMoreTools tools, FakeRunner runner) Build(bool allowWrites = false, string? exportRoot = null)
+    private static (OneMoreTools tools, FakeRunner runner) Build(
+        bool allowWrites = false, string? exportRoot = null, bool syncAfterWrite = false)
     {
-        var options = new OneMoreMcpOptions { AllowWrites = allowWrites, ExportRoot = exportRoot ?? "" };
+        var options = new OneMoreMcpOptions
+        {
+            AllowWrites = allowWrites,
+            ExportRoot = exportRoot ?? "",
+            SyncAfterWrite = syncAfterWrite,
+        };
         var runner = new FakeRunner();
         var tools = new OneMoreTools(runner, new StubMonitor(options), NullLogger<OneMoreTools>.Instance);
         return (tools, runner);
@@ -209,6 +215,64 @@ public class OneMoreToolsTests
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => tools.CreateOrUpdatePage(SamplePageXml, notebook: "N", section: "S", page: "P"));
         Assert.Contains("did not apply", ex.Message);
+    }
+
+    [Fact]
+    public async Task Search_titles_routes_through_output_and_lists_page_paths()
+    {
+        var (tools, runner) = Build();
+        runner.Content["SearchTitles"] =
+            "<Results query=\"q\" count=\"1\"><Page id=\"{1}\" path=\"Work/Ideas/Roadmap\" /></Results>";
+
+        var md = await tools.SearchTitles("Roadmap", notebook: "Work");
+
+        Assert.Contains("- Work/Ideas/Roadmap", md);
+        Assert.Contains("--output", runner.Commands.Single(c => c.Name == "SearchTitles").Build());
+    }
+
+    [Fact]
+    public async Task Search_renders_result_paths_and_passes_the_notebook()
+    {
+        var (tools, runner) = Build();
+        runner.Content["Search"] =
+            "<Results query=\"q\" count=\"1\"><Page id=\"{1}\" path=\"Work/Ideas/Roadmap\" /></Results>";
+
+        var md = await tools.Search("Roadmap", notebook: "Work");
+
+        Assert.Contains("- Work/Ideas/Roadmap", md);
+        Assert.Contains("--notebook", runner.Commands.Single(c => c.Name == "Search").Build());
+    }
+
+    [Fact]
+    public async Task Sync_runs_the_sync_command_and_returns_its_output()
+    {
+        var (tools, runner) = Build();
+        runner.Content["Sync"] = "Synced 1 notebook(s): Work";
+
+        var result = await tools.Sync("Work");
+
+        Assert.Equal("Synced 1 notebook(s): Work", result);
+        Assert.Equal(new[] { "Sync", "--notebook", "Work" }, runner.Commands.Single(c => c.Name == "Sync").Build());
+    }
+
+    [Fact]
+    public async Task Append_auto_syncs_the_notebook_when_enabled()
+    {
+        var (tools, runner) = Build(syncAfterWrite: true);
+        await tools.AppendToPage("note", notebook: "N", section: "S", page: "P", format: "plain");
+
+        // GetPage -> PutPage -> Sync (for the same notebook).
+        Assert.Equal(new[] { "GetPage", "PutPage", "Sync" }, runner.Commands.Select(c => c.Name).ToArray());
+        Assert.Contains("N", runner.Commands.Single(c => c.Name == "Sync").Build());
+    }
+
+    [Fact]
+    public async Task Append_does_not_sync_when_disabled()
+    {
+        var (tools, runner) = Build(syncAfterWrite: false);
+        await tools.AppendToPage("note", notebook: "N", section: "S", page: "P", format: "plain");
+
+        Assert.DoesNotContain(runner.Commands, c => c.Name == "Sync");
     }
 
     // --- Test doubles ---

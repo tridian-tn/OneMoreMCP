@@ -37,6 +37,7 @@ internal static class AppPaths
             "CliPath": "C:\\Program Files\\River\\OneMoreAddIn\\OneMoreCli.exe",
             "AllowWrites": false,
             "DefaultFormat": "markdown",
+            "SyncAfterWrite": true,
             "CommandTimeoutSeconds": 150,
             "ExportRoot": ""
           }

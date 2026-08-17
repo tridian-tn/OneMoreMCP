@@ -355,6 +355,12 @@ public sealed class OneMoreTools
     private async Task PutPageXml(
         string pageXml, string? notebook, string? section, string? page, string? previousXml, CancellationToken cancellationToken)
     {
+        // PutPage (like GetPage) requires --notebook whenever --section/--page is given; without it the
+        // CLI falls into an interactive prompt that the runner can only detect by output-overflow timeout.
+        // Reject that combination upfront with a clear message instead.
+        if (string.IsNullOrWhiteSpace(notebook) && (!string.IsNullOrWhiteSpace(section) || !string.IsNullOrWhiteSpace(page)))
+            throw new McpException("A notebook is required together with section/page.");
+
         var canVerify = !string.IsNullOrWhiteSpace(notebook) && !string.IsNullOrWhiteSpace(section) && !string.IsNullOrWhiteSpace(page);
         if (previousXml is null && canVerify)
         {
@@ -395,9 +401,9 @@ public sealed class OneMoreTools
 
                 if (afterXml is not null && afterXml == previousXml)
                     throw new McpException(
-                        $"PutPage reported success for '{page}', but the page is unchanged after writing — the write " +
-                        "did not take effect. A OneDrive sync conflict reverting the change afterwards is a likely " +
-                        "cause; check the notebook's sync status and retry.");
+                        $"PutPage reported success for '{notebook}/{section}/{page}', but the page is unchanged after " +
+                        "writing — the write did not take effect. A OneDrive sync conflict reverting the change " +
+                        "afterwards is a likely cause; check the notebook's sync status and retry.");
             }
         }
         finally

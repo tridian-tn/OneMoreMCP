@@ -60,8 +60,19 @@ public class OneMoreToolsTests
     public async Task Create_or_update_page_runs_putpage_when_writes_enabled()
     {
         var (tools, runner) = Build(allowWrites: true);
-        await tools.CreateOrUpdatePage(SamplePageXml, section: "S", page: "P");
+        await tools.CreateOrUpdatePage(SampleUpdatedPageXml, notebook: "N", section: "S", page: "P");
         Assert.Contains(runner.Commands, c => c.Name == "PutPage");
+    }
+
+    [Fact]
+    public async Task Create_or_update_page_requires_a_notebook_when_section_or_page_is_given()
+    {
+        // Without --notebook the CLI rejects a --section/--page-scoped PutPage by falling into an
+        // interactive prompt; reject it upfront instead of letting the runner time out on output overflow.
+        var (tools, _) = Build(allowWrites: true);
+        var ex = await Assert.ThrowsAsync<McpException>(
+            () => tools.CreateOrUpdatePage(SamplePageXml, section: "S", page: "P"));
+        Assert.Contains("notebook", ex.Message);
     }
 
     [Fact]

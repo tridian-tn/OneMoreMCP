@@ -350,6 +350,14 @@ public class OneMoreToolsTests
     }
 
     [Fact]
+    public async Task Archive_requires_notebook_and_outfile()
+    {
+        var (tools, _) = Build(allowWrites: true);
+        await Assert.ThrowsAsync<ArgumentException>(() => tools.Archive("", outfile: @"C:\Backups\n.zip"));
+        await Assert.ThrowsAsync<ArgumentException>(() => tools.Archive("N", outfile: "  "));
+    }
+
+    [Fact]
     public async Task Archive_runs_when_allowed()
     {
         var (tools, runner) = Build(allowWrites: true);

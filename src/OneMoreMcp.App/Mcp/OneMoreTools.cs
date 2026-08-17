@@ -257,6 +257,10 @@ public sealed class OneMoreTools
         CancellationToken cancellationToken = default)
     {
         EnsureWritesAllowed();
+        if (string.IsNullOrWhiteSpace(notebook))
+            throw new ArgumentException("A notebook is required to archive.", nameof(notebook));
+        if (string.IsNullOrWhiteSpace(outfile))
+            throw new ArgumentException("An output file path is required to archive.", nameof(outfile));
         EnsureWithinExportRoot(outfile);
         await RunChecked(OneMoreCommand.Archive(notebook, section, outfile), cancellationToken);
         return $"Archived to {outfile}.";

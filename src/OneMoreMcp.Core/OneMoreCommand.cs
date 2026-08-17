@@ -116,6 +116,16 @@ public sealed class OneMoreCommand
     public static OneMoreCommand Goto(string pageId, string? objectId = null) =>
         new OneMoreCommand("Goto").Option("pageId", pageId).Option("objectId", objectId);
 
-    /// <summary>A parameterless housekeeping command (ApplyStyles, RemoveEmpty, Trim, …).</summary>
-    public static OneMoreCommand Simple(string name) => new(name);
+    public static OneMoreCommand Archive(string notebook, string? section, string outfile) =>
+        new OneMoreCommand("Archive").Option("notebook", notebook).Option("section", section).Option("outfile", outfile);
+
+    public static OneMoreCommand Diagnostics(bool includeWindows = false) =>
+        new OneMoreCommand("Diagnostics").Switch("windows", includeWindows);
+
+    /// <summary>
+    /// A page-maintenance command scoped to a notebook (section/page optional). These commands
+    /// (ApplyStyles, RemoveEmpty, Trim, Embed, …) require <c>--notebook</c> in 7.3.0.
+    /// </summary>
+    public static OneMoreCommand Cleanup(string name, string? notebook, string? section = null, string? page = null) =>
+        new OneMoreCommand(name).Option("notebook", notebook).Option("section", section).Option("page", page);
 }

@@ -199,7 +199,7 @@ public class OneMoreToolsTests
         var (tools, runner) = Build(allowWrites: true);
         await tools.CreateOrUpdatePage(SamplePageXml, notebook: "N", section: "S", page: "P");
         await tools.AddHashtag("#x", notebook: "N");
-        await tools.RunCleanup("trim");
+        await tools.RunCleanup("trim", notebook: "N");
 
         // Writes/actions must keep stdout capture, so their success/error detection still works.
         foreach (var name in new[] { "PutPage", "AddHashtag", "Trim" })
@@ -297,6 +297,86 @@ public class OneMoreToolsTests
         await tools.CreateOrUpdatePage(SamplePageXml, notebook: "N", section: "S", page: "P");
 
         Assert.Equal(new[] { "PutPage", "Sync" }, runner.Commands.Select(c => c.Name).ToArray());
+    }
+
+    [Fact]
+    public async Task Run_cleanup_scopes_to_notebook_and_maps_the_operation()
+    {
+        var (tools, runner) = Build(allowWrites: true);
+        await tools.RunCleanup("removeEmpty", notebook: "N", section: "S");
+
+        var argv = runner.Commands.Single(c => c.Name == "RemoveEmpty").Build();
+        Assert.Equal(new[] { "RemoveEmpty", "--notebook", "N", "--section", "S" }, argv);
+    }
+
+    [Fact]
+    public async Task Run_cleanup_embed_adds_the_refresh_switch()
+    {
+        var (tools, runner) = Build(allowWrites: true);
+        await tools.RunCleanup("embed", notebook: "N");
+
+        var argv = runner.Commands.Single(c => c.Name == "Embed").Build();
+        Assert.Equal(new[] { "Embed", "--notebook", "N", "--refresh" }, argv);
+    }
+
+    [Fact]
+    public async Task Run_cleanup_requires_a_notebook()
+    {
+        var (tools, _) = Build(allowWrites: true);
+        await Assert.ThrowsAsync<ArgumentException>(() => tools.RunCleanup("trim", notebook: ""));
+    }
+
+    [Fact]
+    public async Task Run_cleanup_rejects_an_unknown_operation()
+    {
+        var (tools, _) = Build(allowWrites: true);
+        await Assert.ThrowsAsync<ArgumentException>(() => tools.RunCleanup("bogus", notebook: "N"));
+    }
+
+    [Fact]
+    public async Task Archive_is_refused_when_writes_disabled()
+    {
+        var (tools, _) = Build(allowWrites: false);
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => tools.Archive("N", outfile: @"C:\Backups\n.zip"));
+    }
+
+    [Fact]
+    public async Task Archive_is_refused_outside_the_export_root()
+    {
+        var (tools, _) = Build(allowWrites: true, exportRoot: @"C:\Backups");
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => tools.Archive("N", outfile: @"C:\Elsewhere\n.zip"));
+    }
+
+    [Fact]
+    public async Task Archive_requires_notebook_and_outfile()
+    {
+        var (tools, _) = Build(allowWrites: true);
+        await Assert.ThrowsAsync<ArgumentException>(() => tools.Archive("", outfile: @"C:\Backups\n.zip"));
+        await Assert.ThrowsAsync<ArgumentException>(() => tools.Archive("N", outfile: "  "));
+    }
+
+    [Fact]
+    public async Task Archive_runs_when_allowed()
+    {
+        var (tools, runner) = Build(allowWrites: true);
+        await tools.Archive("N", outfile: @"C:\Backups\n.zip", section: "S");
+        Assert.Equal(
+            new[] { "Archive", "--notebook", "N", "--section", "S", "--outfile", @"C:\Backups\n.zip" },
+            runner.Commands.Single(c => c.Name == "Archive").Build());
+    }
+
+    [Fact]
+    public async Task Diagnostics_returns_the_output_file_content()
+    {
+        var (tools, runner) = Build();
+        runner.Content["Diagnostics"] = "{\"onenote\":\"ok\"}";
+
+        var result = await tools.Diagnostics();
+
+        Assert.Equal("{\"onenote\":\"ok\"}", result);
+        Assert.Contains("--output", runner.Commands.Single(c => c.Name == "Diagnostics").Build());
     }
 
     // --- Test doubles ---

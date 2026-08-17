@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using ModelContextProtocol;
 using OneMoreMcp.App;
 using OneMoreMcp.App.Mcp;
 using OneMoreMcp.Core;
@@ -20,6 +21,17 @@ public class OneMoreToolsTests
         "<one:OE><one:T><![CDATA[Existing]]></one:T></one:OE>" +
         "</one:OEChildren></one:Outline></one:Page>";
 
+    // Distinct from SamplePageXml (the fake's default "current page" content) so write tests that need a
+    // real before/after difference — for the silent-no-op read-back check — don't false-positive on writing
+    // content that's byte-identical to what's already "on the page".
+    private const string SampleUpdatedPageXml =
+        "<?xml version=\"1.0\"?>" +
+        "<one:Page xmlns:one=\"http://schemas.microsoft.com/office/onenote/2013/onenote\" ID=\"{P1}\">" +
+        "<one:Title><one:OE><one:T><![CDATA[Title]]></one:T></one:OE></one:Title>" +
+        "<one:Outline><one:OEChildren>" +
+        "<one:OE><one:T><![CDATA[Updated]]></one:T></one:OE>" +
+        "</one:OEChildren></one:Outline></one:Page>";
+
     private static (OneMoreTools tools, FakeRunner runner) Build(
         bool allowWrites = false, string? exportRoot = null, bool syncAfterWrite = true)
     {
@@ -38,7 +50,7 @@ public class OneMoreToolsTests
     public async Task Create_or_update_page_is_refused_when_writes_disabled()
     {
         var (tools, runner) = Build(allowWrites: false);
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+        var ex = await Assert.ThrowsAsync<McpException>(
             () => tools.CreateOrUpdatePage(SamplePageXml, section: "S", page: "P"));
         Assert.Contains("Writes are disabled", ex.Message);
         Assert.Empty(runner.Commands); // nothing was executed
@@ -48,8 +60,19 @@ public class OneMoreToolsTests
     public async Task Create_or_update_page_runs_putpage_when_writes_enabled()
     {
         var (tools, runner) = Build(allowWrites: true);
-        await tools.CreateOrUpdatePage(SamplePageXml, section: "S", page: "P");
+        await tools.CreateOrUpdatePage(SampleUpdatedPageXml, notebook: "N", section: "S", page: "P");
         Assert.Contains(runner.Commands, c => c.Name == "PutPage");
+    }
+
+    [Fact]
+    public async Task Create_or_update_page_requires_a_notebook_when_section_or_page_is_given()
+    {
+        // Without --notebook the CLI rejects a --section/--page-scoped PutPage by falling into an
+        // interactive prompt; reject it upfront instead of letting the runner time out on output overflow.
+        var (tools, _) = Build(allowWrites: true);
+        var ex = await Assert.ThrowsAsync<McpException>(
+            () => tools.CreateOrUpdatePage(SamplePageXml, section: "S", page: "P"));
+        Assert.Contains("notebook", ex.Message);
     }
 
     [Fact]
@@ -59,8 +82,8 @@ public class OneMoreToolsTests
         var result = await tools.AppendToPage("New note", notebook: "N", section: "S", page: "P", format: "plain");
 
         Assert.Equal("Appended.", result);
-        // It reads the page then writes it back — GetPage before PutPage.
-        Assert.Equal(new[] { "GetPage", "PutPage" }, runner.Commands.Select(c => c.Name).ToArray());
+        // It reads the page, writes it back, then reads it again to verify the write took effect.
+        Assert.Equal(new[] { "GetPage", "PutPage", "GetPage" }, runner.Commands.Select(c => c.Name).ToArray());
         // The written XML preserved the existing content and added the new line.
         Assert.Contains("Existing", runner.LastInfileXml);
         Assert.Contains("New note", runner.LastInfileXml);
@@ -70,7 +93,7 @@ public class OneMoreToolsTests
     public async Task Append_to_page_requires_a_target()
     {
         var (tools, _) = Build();
-        await Assert.ThrowsAsync<ArgumentException>(
+        await Assert.ThrowsAsync<McpException>(
             () => tools.AppendToPage("text", notebook: "", section: "", page: "", format: "plain"));
     }
 
@@ -89,7 +112,7 @@ public class OneMoreToolsTests
     public async Task Export_is_refused_outside_the_configured_root()
     {
         var (tools, _) = Build(allowWrites: true, exportRoot: @"C:\Exports");
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+        var ex = await Assert.ThrowsAsync<McpException>(
             () => tools.Export(outpath: @"C:\Elsewhere\out", format: "PDF"));
         Assert.Contains("ExportRoot", ex.Message);
     }
@@ -98,7 +121,7 @@ public class OneMoreToolsTests
     public async Task Add_hashtag_is_gated_by_writes()
     {
         var (tools, _) = Build(allowWrites: false);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => tools.AddHashtag("#todo", notebook: "N"));
+        await Assert.ThrowsAsync<McpException>(() => tools.AddHashtag("#todo", notebook: "N"));
     }
 
     [Fact]
@@ -122,7 +145,7 @@ public class OneMoreToolsTests
     public async Task Create_or_update_page_rejects_malformed_xml()
     {
         var (tools, _) = Build(allowWrites: true);
-        await Assert.ThrowsAsync<ArgumentException>(
+        await Assert.ThrowsAsync<McpException>(
             () => tools.CreateOrUpdatePage("<one:Page", notebook: "N", section: "S", page: "P"));
     }
 
@@ -159,7 +182,7 @@ public class OneMoreToolsTests
         var (tools, runner) = Build();
         runner.ExitCode = 1;
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+        var ex = await Assert.ThrowsAsync<McpException>(
             () => tools.GetPage(notebook: "N", section: "S", page: "P", current: false, format: "xml"));
         Assert.Contains("GetPage", ex.Message);
     }
@@ -197,7 +220,7 @@ public class OneMoreToolsTests
     public async Task Write_and_action_commands_do_not_use_output()
     {
         var (tools, runner) = Build(allowWrites: true);
-        await tools.CreateOrUpdatePage(SamplePageXml, notebook: "N", section: "S", page: "P");
+        await tools.CreateOrUpdatePage(SampleUpdatedPageXml, notebook: "N", section: "S", page: "P");
         await tools.AddHashtag("#x", notebook: "N");
         await tools.RunCleanup("trim", notebook: "N");
 
@@ -212,9 +235,46 @@ public class OneMoreToolsTests
         var (tools, runner) = Build(allowWrites: true);
         runner.Content["PutPage"] = "schema error";   // PutPage prints to stdout while exiting 0
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+        var ex = await Assert.ThrowsAsync<McpException>(
             () => tools.CreateOrUpdatePage(SamplePageXml, notebook: "N", section: "S", page: "P"));
         Assert.Contains("did not apply", ex.Message);
+    }
+
+    [Fact]
+    public async Task Append_to_page_throws_when_the_write_silently_does_not_take_effect()
+    {
+        // PutPage exits clean (no stdout) but the page is unchanged afterwards — e.g. a OneDrive sync
+        // reverting the change post-write. The read-back check must catch this, not report "Appended.".
+        var (tools, runner) = Build(syncAfterWrite: false);
+        runner.SimulateNoOpWrite = true;
+
+        var ex = await Assert.ThrowsAsync<McpException>(
+            () => tools.AppendToPage("note", notebook: "N", section: "S", page: "P", format: "plain"));
+        Assert.Contains("unchanged", ex.Message);
+    }
+
+    [Fact]
+    public async Task Create_or_update_page_throws_when_the_write_silently_does_not_take_effect()
+    {
+        var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
+        runner.SimulateNoOpWrite = true;
+
+        var ex = await Assert.ThrowsAsync<McpException>(
+            () => tools.CreateOrUpdatePage(SampleUpdatedPageXml, notebook: "N", section: "S", page: "P"));
+        Assert.Contains("unchanged", ex.Message);
+    }
+
+    [Fact]
+    public async Task Create_or_update_page_skips_verification_when_the_page_is_not_fully_identified()
+    {
+        // No page name given (title/ID comes from the XML instead) — the target page can't be read back
+        // deterministically, so the no-op check is skipped rather than false-flagging a page creation.
+        var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
+        runner.SimulateNoOpWrite = true;
+
+        await tools.CreateOrUpdatePage(SampleUpdatedPageXml, notebook: "N", section: "S");
+
+        Assert.Contains(runner.Commands, c => c.Name == "PutPage");
     }
 
     [Fact]
@@ -259,14 +319,14 @@ public class OneMoreToolsTests
     public async Task Search_requires_a_notebook()
     {
         var (tools, _) = Build();
-        await Assert.ThrowsAsync<ArgumentException>(() => tools.Search("q", notebook: "  "));
+        await Assert.ThrowsAsync<McpException>(() => tools.Search("q", notebook: "  "));
     }
 
     [Fact]
     public async Task Sync_requires_a_notebook()
     {
         var (tools, _) = Build();
-        await Assert.ThrowsAsync<ArgumentException>(() => tools.Sync(""));
+        await Assert.ThrowsAsync<McpException>(() => tools.Sync(""));
     }
 
     [Fact]
@@ -275,8 +335,8 @@ public class OneMoreToolsTests
         var (tools, runner) = Build(syncAfterWrite: true);
         await tools.AppendToPage("note", notebook: "N", section: "S", page: "P", format: "plain");
 
-        // GetPage -> PutPage -> Sync (for the same notebook).
-        Assert.Equal(new[] { "GetPage", "PutPage", "Sync" }, runner.Commands.Select(c => c.Name).ToArray());
+        // GetPage -> PutPage -> Sync -> GetPage (the last read-back verifies the write took effect).
+        Assert.Equal(new[] { "GetPage", "PutPage", "Sync", "GetPage" }, runner.Commands.Select(c => c.Name).ToArray());
         Assert.Contains("N", runner.Commands.Single(c => c.Name == "Sync").Build());
     }
 
@@ -294,9 +354,10 @@ public class OneMoreToolsTests
     {
         // Auto-sync lives in the shared PutPageXml, so it must apply to create_or_update_page too.
         var (tools, runner) = Build(allowWrites: true, syncAfterWrite: true);
-        await tools.CreateOrUpdatePage(SamplePageXml, notebook: "N", section: "S", page: "P");
+        await tools.CreateOrUpdatePage(SampleUpdatedPageXml, notebook: "N", section: "S", page: "P");
 
-        Assert.Equal(new[] { "PutPage", "Sync" }, runner.Commands.Select(c => c.Name).ToArray());
+        // GetPage (before-snapshot) -> PutPage -> Sync -> GetPage (verifies the write took effect).
+        Assert.Equal(new[] { "GetPage", "PutPage", "Sync", "GetPage" }, runner.Commands.Select(c => c.Name).ToArray());
     }
 
     [Fact]
@@ -323,21 +384,21 @@ public class OneMoreToolsTests
     public async Task Run_cleanup_requires_a_notebook()
     {
         var (tools, _) = Build(allowWrites: true);
-        await Assert.ThrowsAsync<ArgumentException>(() => tools.RunCleanup("trim", notebook: ""));
+        await Assert.ThrowsAsync<McpException>(() => tools.RunCleanup("trim", notebook: ""));
     }
 
     [Fact]
     public async Task Run_cleanup_rejects_an_unknown_operation()
     {
         var (tools, _) = Build(allowWrites: true);
-        await Assert.ThrowsAsync<ArgumentException>(() => tools.RunCleanup("bogus", notebook: "N"));
+        await Assert.ThrowsAsync<McpException>(() => tools.RunCleanup("bogus", notebook: "N"));
     }
 
     [Fact]
     public async Task Archive_is_refused_when_writes_disabled()
     {
         var (tools, _) = Build(allowWrites: false);
-        await Assert.ThrowsAsync<InvalidOperationException>(
+        await Assert.ThrowsAsync<McpException>(
             () => tools.Archive("N", outfile: @"C:\Backups\n.zip"));
     }
 
@@ -345,7 +406,7 @@ public class OneMoreToolsTests
     public async Task Archive_is_refused_outside_the_export_root()
     {
         var (tools, _) = Build(allowWrites: true, exportRoot: @"C:\Backups");
-        await Assert.ThrowsAsync<InvalidOperationException>(
+        await Assert.ThrowsAsync<McpException>(
             () => tools.Archive("N", outfile: @"C:\Elsewhere\n.zip"));
     }
 
@@ -353,8 +414,8 @@ public class OneMoreToolsTests
     public async Task Archive_requires_notebook_and_outfile()
     {
         var (tools, _) = Build(allowWrites: true);
-        await Assert.ThrowsAsync<ArgumentException>(() => tools.Archive("", outfile: @"C:\Backups\n.zip"));
-        await Assert.ThrowsAsync<ArgumentException>(() => tools.Archive("N", outfile: "  "));
+        await Assert.ThrowsAsync<McpException>(() => tools.Archive("", outfile: @"C:\Backups\n.zip"));
+        await Assert.ThrowsAsync<McpException>(() => tools.Archive("N", outfile: "  "));
     }
 
     [Fact]
@@ -395,6 +456,14 @@ public class OneMoreToolsTests
         /// <summary>Exit code the fake reports.</summary>
         public int ExitCode { get; set; } = 0;
 
+        /// <summary>What a subsequent GetPage returns once a PutPage has "landed" — simulates real persistence
+        /// so tests exercise the same before/after read-back the app does. Null until the first PutPage.</summary>
+        public string? PersistedPageXml { get; private set; }
+
+        /// <summary>When true, PutPage exits clean but never updates <see cref="PersistedPageXml"/> — simulates
+        /// the silent no-op write from issue #10 (e.g. a OneDrive sync reverting the change).</summary>
+        public bool SimulateNoOpWrite { get; set; }
+
         public string? TryResolveCliPath() => "fake-onemore.exe";
 
         public Task<CliResult> RunAsync(OneMoreCommand command, CancellationToken cancellationToken = default)
@@ -402,15 +471,17 @@ public class OneMoreToolsTests
             Commands.Add(command);
             var argv = command.Build();
 
-            // Capture the XML handed to PutPage via --infile so tests can assert on it.
+            // Capture the XML handed to PutPage via --infile so tests can assert on it, and simulate the
+            // write landing so a follow-up GetPage reflects it (unless a no-op write is being simulated).
             if (command.Name == "PutPage")
             {
                 var infile = OptionValue(argv, "--infile");
                 if (infile != null) LastInfileXml = File.ReadAllText(infile);
+                if (!SimulateNoOpWrite) PersistedPageXml = LastInfileXml;
             }
 
             var payload = Content.TryGetValue(command.Name, out var c) ? c
-                : command.Name == "GetPage" ? SamplePageXml : "";
+                : command.Name == "GetPage" ? (PersistedPageXml ?? SamplePageXml) : "";
 
             // With --output the CLI writes the payload to the file and stdout carries only diagnostics;
             // without it, the payload comes back on stdout (write/action commands).

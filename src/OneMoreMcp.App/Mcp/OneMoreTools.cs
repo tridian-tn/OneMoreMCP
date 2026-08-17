@@ -4,6 +4,7 @@ using System.Xml;
 using System.Xml.Linq;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using ModelContextProtocol;
 using ModelContextProtocol.Server;
 using OneMoreMcp.Core;
 
@@ -69,7 +70,7 @@ public sealed class OneMoreTools
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(notebook))
-            throw new ArgumentException("A notebook is required for search.", nameof(notebook));
+            throw new McpException("A notebook is required for search.");
         var xml = await ReadContent(OneMoreCommand.Search(query, notebook, section, page), cancellationToken);
         return AsXml(format) ? xml : OneNoteContent.SearchResultsToMarkdown(xml);
     }
@@ -112,16 +113,21 @@ public sealed class OneMoreTools
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(text))
-            throw new ArgumentException("There is no text to append.", nameof(text));
+            throw new McpException("There is no text to append.");
 
-        // 1. Fetch the page's raw XML locally — this is NOT returned to the caller.
+        // 1. Fetch the page's raw XML locally — this is NOT returned to the caller. Doubles as the
+        // "before" snapshot PutPageXml uses to verify the write actually took effect.
         var pageXml = await ReadPageXml(notebook, section, page, current: false, cancellationToken);
 
-        // 2. Insert the new text, preserving everything else.
-        var updated = PageAppender.Append(pageXml, text, ParseAppendFormat(format));
+        // 2. Insert the new text, preserving everything else. PageAppender lives in the pure Core
+        // project and throws plain ArgumentException; translate to McpException so the message
+        // reaches the client instead of being replaced with a generic one.
+        string updated;
+        try { updated = PageAppender.Append(pageXml, text, ParseAppendFormat(format)); }
+        catch (ArgumentException ex) { throw new McpException(ex.Message, ex); }
 
         // 3. Write it back via PutPage --page --force (overwrites the same page with the added content).
-        await PutPageXml(updated, notebook, section, page, cancellationToken);
+        await PutPageXml(updated, notebook, section, page, pageXml, cancellationToken);
         _log.LogInformation("Appended text to a OneNote page (notebook='{Notebook}', section='{Section}', page='{Page}').",
             notebook, section, page);
         return "Appended.";
@@ -141,11 +147,11 @@ public sealed class OneMoreTools
     {
         EnsureWritesAllowed();
         if (string.IsNullOrWhiteSpace(pageXml))
-            throw new ArgumentException("The page XML is empty.", nameof(pageXml));
+            throw new McpException("The page XML is empty.");
         // Fail early on malformed XML with a clear message (rather than a vaguer downstream CLI error).
         try { XDocument.Parse(pageXml); }
-        catch (XmlException ex) { throw new ArgumentException("The page XML could not be parsed.", nameof(pageXml), ex); }
-        await PutPageXml(pageXml, notebook, section, page, cancellationToken);
+        catch (XmlException ex) { throw new McpException("The page XML could not be parsed.", ex); }
+        await PutPageXml(pageXml, notebook, section, page, previousXml: null, cancellationToken);
         return "Page written.";
     }
 
@@ -213,7 +219,7 @@ public sealed class OneMoreTools
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(notebook))
-            throw new ArgumentException("A notebook is required to sync.", nameof(notebook));
+            throw new McpException("A notebook is required to sync.");
         var output = await RunChecked(OneMoreCommand.Sync(notebook), cancellationToken);
         return string.IsNullOrWhiteSpace(output) ? $"Synced '{notebook}'." : output.Trim();
     }
@@ -242,7 +248,7 @@ public sealed class OneMoreTools
     {
         EnsureWritesAllowed();
         if (string.IsNullOrWhiteSpace(notebook))
-            throw new ArgumentException("A notebook is required for cleanup operations.", nameof(notebook));
+            throw new McpException("A notebook is required for cleanup operations.");
         var command = ResolveCleanup(operation, notebook, section, page);
         await RunChecked(command, cancellationToken);
         return $"Ran {command.Name}.";
@@ -258,9 +264,9 @@ public sealed class OneMoreTools
     {
         EnsureWritesAllowed();
         if (string.IsNullOrWhiteSpace(notebook))
-            throw new ArgumentException("A notebook is required to archive.", nameof(notebook));
+            throw new McpException("A notebook is required to archive.");
         if (string.IsNullOrWhiteSpace(outfile))
-            throw new ArgumentException("An output file path is required to archive.", nameof(outfile));
+            throw new McpException("An output file path is required to archive.");
         EnsureWithinExportRoot(outfile);
         await RunChecked(OneMoreCommand.Archive(notebook, section, outfile), cancellationToken);
         return $"Archived to {outfile}.";
@@ -279,7 +285,7 @@ public sealed class OneMoreTools
     private static void EnsureOk(OneMoreCommand command, CliResult result)
     {
         if (!result.Ok)
-            throw new InvalidOperationException(
+            throw new McpException(
                 $"OneMore CLI '{command.Name}' failed (exit {result.ExitCode}): {Trim(result.StdErr, result.StdOut)}");
     }
 
@@ -310,7 +316,7 @@ public sealed class OneMoreTools
 
             var length = new FileInfo(temp).Length;
             if (length > MaxContentBytes)
-                throw new InvalidOperationException(
+                throw new McpException(
                     $"OneMore CLI '{command.Name}' produced {length / (1024 * 1024)} MB of output, " +
                     $"exceeding the {MaxContentBytes / (1024 * 1024)} MB limit.");
 
@@ -328,13 +334,34 @@ public sealed class OneMoreTools
     private async Task<string> ReadPageXml(string? notebook, string? section, string? page, bool current, CancellationToken cancellationToken)
     {
         if (!current && (string.IsNullOrWhiteSpace(notebook) || string.IsNullOrWhiteSpace(section) || string.IsNullOrWhiteSpace(page)))
-            throw new ArgumentException("Specify notebook, section, and page together — or set current=true.");
+            throw new McpException("Specify notebook, section, and page together — or set current=true.");
         return await ReadContent(OneMoreCommand.GetPage(notebook, section, page, current), cancellationToken);
     }
 
-    /// <summary>Writes page XML to a temp file and hands it to PutPage --force, cleaning up afterwards.</summary>
-    private async Task PutPageXml(string pageXml, string? notebook, string? section, string? page, CancellationToken cancellationToken)
+    /// <summary>
+    /// Writes page XML to a temp file, hands it to PutPage --force, and verifies the write actually
+    /// took effect. A clean PutPage exit isn't proof of that: the CLI can retry past a transient COM
+    /// error and still exit 0, and on a OneDrive-synced notebook the follow-up Sync can resolve a
+    /// conflict in favour of the server copy, silently reverting the local change. When the target
+    /// page can be identified (notebook+section+page all given), the page is read back afterwards and
+    /// compared against a "before" snapshot — a mismatch means the write is confirmed; an exact match
+    /// means it silently no-opped.
+    /// </summary>
+    /// <param name="previousXml">
+    /// The page's content before this write, if the caller already fetched it (e.g. append_to_page).
+    /// Pass null to have this method fetch it itself; a fetch failure is treated as "page doesn't exist
+    /// yet" and verification is skipped, since that's effectively a page creation.
+    /// </param>
+    private async Task PutPageXml(
+        string pageXml, string? notebook, string? section, string? page, string? previousXml, CancellationToken cancellationToken)
     {
+        var canVerify = !string.IsNullOrWhiteSpace(notebook) && !string.IsNullOrWhiteSpace(section) && !string.IsNullOrWhiteSpace(page);
+        if (previousXml is null && canVerify)
+        {
+            try { previousXml = await ReadPageXml(notebook, section, page, current: false, cancellationToken); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { /* page likely doesn't exist yet */ }
+        }
+
         // The XML is sent as-is (omHash intact): PutPage accepts it and uses omHash for change detection.
         var temp = NewTempFile();
         await File.WriteAllTextAsync(temp, pageXml, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
@@ -344,7 +371,7 @@ public sealed class OneMoreTools
             // exiting 0, so treat any output as a failure rather than falsely reporting success.
             var output = await RunChecked(OneMoreCommand.PutPage(notebook, section, page, temp, force: true), cancellationToken);
             if (!string.IsNullOrWhiteSpace(output))
-                throw new InvalidOperationException($"OneMore PutPage did not apply the change: {output.Trim()}");
+                throw new McpException($"OneMore PutPage did not apply the change: {output.Trim()}");
 
             // Best-effort flush so the write reliably lands / is visible on the next read.
             if (_options.CurrentValue.SyncAfterWrite && !string.IsNullOrWhiteSpace(notebook))
@@ -355,6 +382,22 @@ public sealed class OneMoreTools
                 {
                     _log.LogWarning(ex, "Auto-sync after write failed for notebook '{Notebook}'.", notebook);
                 }
+            }
+
+            if (previousXml is not null && canVerify)
+            {
+                string? afterXml = null;
+                try { afterXml = await ReadPageXml(notebook, section, page, current: false, cancellationToken); }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _log.LogWarning(ex, "Could not read back '{Page}' to verify the write took effect.", page);
+                }
+
+                if (afterXml is not null && afterXml == previousXml)
+                    throw new McpException(
+                        $"PutPage reported success for '{page}', but the page is unchanged after writing — the write " +
+                        "did not take effect. A OneDrive sync conflict reverting the change afterwards is a likely " +
+                        "cause; check the notebook's sync status and retry.");
             }
         }
         finally
@@ -373,7 +416,7 @@ public sealed class OneMoreTools
     private void EnsureWritesAllowed()
     {
         if (!_options.CurrentValue.AllowWrites)
-            throw new InvalidOperationException(
+            throw new McpException(
                 "Writes are disabled. Enable them by setting \"AllowWrites\": true in the configuration " +
                 "(tray menu → Open configuration…), then restart. (append_to_page works without this.)");
     }
@@ -388,7 +431,7 @@ public sealed class OneMoreTools
         var rootWithSep = fullRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         if (!fullOut.Equals(fullRoot, StringComparison.OrdinalIgnoreCase) &&
             !fullOut.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException($"Export path must be within the configured ExportRoot ('{fullRoot}').");
+            throw new McpException($"Export path must be within the configured ExportRoot ('{fullRoot}').");
     }
 
     private bool AsXml(string? format)
@@ -398,7 +441,7 @@ public sealed class OneMoreTools
         {
             "xml" => true,
             "markdown" or "md" or "" => false,
-            _ => throw new ArgumentException($"Unknown format '{format}'. Use 'markdown' or 'xml'."),
+            _ => throw new McpException($"Unknown format '{format}'. Use 'markdown' or 'xml'."),
         };
     }
 
@@ -408,7 +451,7 @@ public sealed class OneMoreTools
             "markdown" or "md" or "" => AppendFormat.Markdown,
             "html" => AppendFormat.Html,
             "plain" or "text" => AppendFormat.Plain,
-            _ => throw new ArgumentException($"Unknown format '{format}'. Use 'markdown', 'html', or 'plain'."),
+            _ => throw new McpException($"Unknown format '{format}'. Use 'markdown', 'html', or 'plain'."),
         };
 
     private static OneMoreCommand ResolveCleanup(string operation, string? notebook, string? section, string? page)
@@ -428,7 +471,7 @@ public sealed class OneMoreTools
             "enablespellcheck" => "EnableSpellCheck",
             "disablespellcheck" => "DisableSpellCheck",
             "embed" => "Embed",
-            _ => throw new ArgumentException(
+            _ => throw new McpException(
                 $"Unknown cleanup operation '{operation}'. Valid: applyStyles, clearBackground, removeEmpty, trim, " +
                 "recalculate, removeAuthors, removeInk, removeCitations, removeTags, restoreAutosize, " +
                 "enableSpellCheck, disableSpellCheck, embed."),

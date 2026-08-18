@@ -137,12 +137,14 @@ public sealed class OneMoreTools
 
     [McpServerTool(Name = "create_or_update_page")]
     [Description("Create or overwrite a page from raw OneNote page XML (as returned by get_page with format='xml'). "
-        + "OVERWRITES the target page. Requires writes to be enabled. For simply adding text, use append_to_page instead.")]
+        + "To OVERWRITE an existing page, pass its name as 'page'. To CREATE a new page, OMIT 'page' — the title "
+        + "comes from the XML; naming a page that doesn't exist yet creates an empty 'Untitled' page instead. "
+        + "Requires writes to be enabled. For simply adding text, use append_to_page instead.")]
     public async Task<string> CreateOrUpdatePage(
         [Description("The full OneNote page XML (one:Page document).")] string pageXml,
-        [Description("Notebook name to place the page in.")] string? notebook = null,
-        [Description("Section name to place the page in ('/'-delimited).")] string? section = null,
-        [Description("Page name. Omit to use the title/ID in the XML.")] string? page = null,
+        [Description("Notebook name to place the page in.")] string notebook,
+        [Description("Section name to place the page in ('/'-delimited).")] string section,
+        [Description("Name of the EXISTING page to overwrite. Omit to create a new page from the XML's title.")] string? page = null,
         CancellationToken cancellationToken = default)
     {
         EnsureWritesAllowed();
@@ -342,10 +344,9 @@ public sealed class OneMoreTools
     /// Writes page XML to a temp file, hands it to PutPage --force, and verifies the write actually
     /// took effect. A clean PutPage exit isn't proof of that: the CLI can retry past a transient COM
     /// error and still exit 0, and on a OneDrive-synced notebook the follow-up Sync can resolve a
-    /// conflict in favour of the server copy, silently reverting the local change. When the target
-    /// page can be identified (notebook+section+page all given), the page is read back afterwards and
-    /// compared against a "before" snapshot — a mismatch means the write is confirmed; an exact match
-    /// means it silently no-opped.
+    /// conflict in favour of the server copy, silently reverting the local change. When the target page
+    /// has been named, it's read back afterwards and compared against a "before" snapshot — a mismatch
+    /// means the write is confirmed; an exact match means it silently no-opped.
     /// </summary>
     /// <param name="previousXml">
     /// The page's content before this write, if the caller already fetched it (e.g. append_to_page).
@@ -355,13 +356,18 @@ public sealed class OneMoreTools
     private async Task PutPageXml(
         string pageXml, string? notebook, string? section, string? page, string? previousXml, CancellationToken cancellationToken)
     {
-        // PutPage (like GetPage) requires --notebook whenever --section/--page is given; without it the
-        // CLI falls into an interactive prompt that the runner can only detect by output-overflow timeout.
-        // Reject that combination upfront with a clear message instead.
-        if (string.IsNullOrWhiteSpace(notebook) && (!string.IsNullOrWhiteSpace(section) || !string.IsNullOrWhiteSpace(page)))
-            throw new McpException("A notebook is required together with section/page.");
+        // The CLI marks --notebook and --section as required for PutPage (only --page is optional).
+        // Omitting either makes it fall into an interactive prompt that the runner can detect only via
+        // an output-overflow kill, so reject it upfront with a message that says which one is missing.
+        if (string.IsNullOrWhiteSpace(notebook))
+            throw new McpException("A notebook is required to write a page.");
+        if (string.IsNullOrWhiteSpace(section))
+            throw new McpException("A section is required to write a page.");
 
-        var canVerify = !string.IsNullOrWhiteSpace(notebook) && !string.IsNullOrWhiteSpace(section) && !string.IsNullOrWhiteSpace(page);
+        // Notebook and section are guaranteed present by the guard above, so the target page can be read
+        // back whenever it's been named. Without --page the CLI derives the page from the XML's title, and
+        // there's no reliable name to read back by, so verification is skipped.
+        var canVerify = !string.IsNullOrWhiteSpace(page);
         if (previousXml is null && canVerify)
         {
             try { previousXml = await ReadPageXml(notebook, section, page, current: false, cancellationToken); }

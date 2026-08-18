@@ -246,18 +246,19 @@ XML is verbose and namespaced, and sending it verbatim is token-heavy. Pass `for
 to edit it and write it back with `update_page`. The Markdown projection is lossy on
 styling by design: it preserves structure and text, not formatting.
 
-## Pages can't be created
+## Creating pages doesn't currently work
 
-The OneMore CLI has **no page-creation command**, so neither this server nor the CLI can add a page
-to a notebook — the page must already exist in OneNote. `PutPage` fails at it two different ways,
-neither of which reports an error:
+`PutPage` documents a create path — naming a page **without** `--force` *"will attempt to create a
+page of that name"* — but it doesn't work in practice. Live testing against OneMore 7.3.0 shows the
+page shell is created and page-level attributes are applied, then **the title and outline never
+land**, leaving an empty **"Untitled"** page. This happens with both hand-written and real
+`GetPage`-derived XML. Overwriting an *existing* page works correctly, so it's specific to creation —
+most likely the same "content update doesn't commit" fault behind the silent no-op writes in
+[#10](https://github.com/tridian-tn/OneMoreMCP/issues/10), hitting pages OneMore has just created.
 
-- naming a page that doesn't exist creates an empty **"Untitled"** page and discards the content;
-- omitting the page name writes nothing at all (exit 0, no output, no page).
-
-`update_page` therefore checks the target exists before writing, and fails with a clear message if it
-doesn't, rather than leaving a junk "Untitled" page behind. Create the page in OneNote first, then
-write to it by name.
+Because the CLI has no delete command, every failed attempt leaves a junk "Untitled" page behind.
+`update_page` therefore checks its target exists before writing and fails with a clear message if it
+doesn't. Create the page in OneNote first, then write to it by name.
 
 ## Appending vs. writing
 

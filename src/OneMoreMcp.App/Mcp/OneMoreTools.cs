@@ -137,8 +137,8 @@ public sealed class OneMoreTools
 
     [McpServerTool(Name = "update_page")]
     [Description("OVERWRITE an EXISTING OneNote page from raw page XML (as returned by get_page with format='xml'). "
-        + "Cannot create pages — the OneMore CLI has no page-creation command, so the page must already exist; "
-        + "create it in OneNote first. Requires writes to be enabled. For simply adding text, use append_to_page.")]
+        + "The page must already exist — this tool won't create one. Requires writes to be enabled. "
+        + "For simply adding text, use append_to_page.")]
     public async Task<string> UpdatePage(
         [Description("The full OneNote page XML (one:Page document).")] string pageXml,
         [Description("Notebook name containing the page.")] string notebook,
@@ -345,8 +345,8 @@ public sealed class OneMoreTools
     /// retry past a transient COM error and still exit 0, and on a OneDrive-synced notebook the follow-up
     /// Sync can resolve a conflict in favour of the server copy, silently reverting the local change. The
     /// page is read back afterwards and compared against a "before" snapshot: a mismatch confirms the
-    /// write; an exact match means it silently no-opped. The target must already exist — PutPage can't
-    /// create, and attempting it leaves an empty "Untitled" page behind.
+    /// write; an exact match means it silently no-opped. The target must already exist: PutPage's create
+    /// path is broken and leaves an empty "Untitled" page rather than applying the content.
     /// </summary>
     /// <param name="previousXml">
     /// The page's content before this write, if the caller already fetched it (e.g. append_to_page).
@@ -363,15 +363,13 @@ public sealed class OneMoreTools
         if (string.IsNullOrWhiteSpace(section))
             throw new McpException("A section is required to write a page.");
 
-        // PutPage can only UPDATE an existing page — the CLI has no page-creation command. Naming a page
-        // that doesn't exist makes it create an empty "Untitled" shell and drop the supplied content on
-        // the floor, and omitting --page writes nothing at all. Neither reports an error, so refuse a
-        // write whose target can't be confirmed to exist rather than leaving junk pages behind.
+        // This is the overwrite path (PutPage --force), which needs an existing target. PutPage does have a
+        // create path — naming a page without --force — but it's broken: live testing shows it creates the
+        // page shell and applies page-level attributes, then never applies the title or outline, leaving an
+        // empty "Untitled" page. Since the CLI has no delete, refuse a write whose target can't be confirmed
+        // to exist rather than littering the section with junk pages.
         if (string.IsNullOrWhiteSpace(page))
-            throw new McpException(
-                "A page name is required. The OneMore CLI can only overwrite an existing page — it has no " +
-                "command to create one, and a write with no page named silently does nothing. Create the page " +
-                "in OneNote first, then write to it by name.");
+            throw new McpException("A page name is required to identify the page to overwrite.");
 
         if (previousXml is null)
         {
@@ -382,9 +380,9 @@ public sealed class OneMoreTools
         // A missing page reads back as empty rather than failing, so absence shows up as blank content.
         if (string.IsNullOrWhiteSpace(previousXml))
             throw new McpException(
-                $"Page '{page}' was not found in {notebook}/{section}. The OneMore CLI cannot create pages — " +
-                "writing to a name that doesn't exist produces an empty 'Untitled' page and discards the " +
-                "content. Create the page in OneNote first, then write to it by name.");
+                $"Page '{page}' was not found in {notebook}/{section}. This tool overwrites an existing page and " +
+                "won't create one — the OneMore CLI's create path is currently broken, producing an empty " +
+                "'Untitled' page and discarding the content. Create the page in OneNote first, then write to it.");
 
         // The XML is sent as-is (omHash intact): PutPage accepts it and uses omHash for change detection.
         var temp = NewTempFile();

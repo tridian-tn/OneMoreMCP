@@ -289,8 +289,8 @@ public class OneMoreToolsTests
     [Fact]
     public async Task Update_page_refuses_a_page_that_does_not_exist_without_writing()
     {
-        // The CLI can't create: writing to an unknown name yields an empty "Untitled" page and discards the
-        // content. A missing page reads back as empty, so refuse before PutPage rather than leaving junk.
+        // The CLI's create path is broken — writing to an unknown name yields an empty "Untitled" page and
+        // discards the content. A missing page reads back as empty, so refuse before PutPage leaves junk.
         var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
         runner.PageMissing = true;
 

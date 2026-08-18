@@ -135,16 +135,15 @@ public sealed class OneMoreTools
 
     // ---------------- Write (gated) ----------------
 
-    [McpServerTool(Name = "create_or_update_page")]
-    [Description("Create or overwrite a page from raw OneNote page XML (as returned by get_page with format='xml'). "
-        + "To OVERWRITE an existing page, pass its name as 'page'. To CREATE a new page, OMIT 'page' — the title "
-        + "comes from the XML; naming a page that doesn't exist yet creates an empty 'Untitled' page instead. "
-        + "Requires writes to be enabled. For simply adding text, use append_to_page instead.")]
-    public async Task<string> CreateOrUpdatePage(
+    [McpServerTool(Name = "update_page")]
+    [Description("OVERWRITE an EXISTING OneNote page from raw page XML (as returned by get_page with format='xml'). "
+        + "The page must already exist — this tool won't create one. Requires writes to be enabled. "
+        + "For simply adding text, use append_to_page.")]
+    public async Task<string> UpdatePage(
         [Description("The full OneNote page XML (one:Page document).")] string pageXml,
-        [Description("Notebook name to place the page in.")] string notebook,
-        [Description("Section name to place the page in ('/'-delimited).")] string section,
-        [Description("Name of the EXISTING page to overwrite. Omit to create a new page from the XML's title.")] string? page = null,
+        [Description("Notebook name containing the page.")] string notebook,
+        [Description("Section name containing the page ('/'-delimited).")] string section,
+        [Description("Name of the existing page to overwrite.")] string page,
         CancellationToken cancellationToken = default)
     {
         EnsureWritesAllowed();
@@ -154,7 +153,56 @@ public sealed class OneMoreTools
         try { XDocument.Parse(pageXml); }
         catch (XmlException ex) { throw new McpException("The page XML could not be parsed.", ex); }
         await PutPageXml(pageXml, notebook, section, page, previousXml: null, cancellationToken);
-        return "Page written.";
+        return "Page updated.";
+    }
+
+    [McpServerTool(Name = "create_page")]
+    [Description("Create a new page with the given title. IMPORTANT: the page is created EMPTY and cannot be "
+        + "given body text — the OneMore CLI can only modify content that already exists, so nothing (including "
+        + "append_to_page) can write into it until someone types in the page in OneNote. Use it to place a "
+        + "titled page; use append_to_page for pages that already have content. Requires writes to be enabled.")]
+    public async Task<string> CreatePage(
+        [Description("Notebook name to create the page in.")] string notebook,
+        [Description("Section name to create the page in ('/'-delimited).")] string section,
+        [Description("Title for the new page.")] string title,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureWritesAllowed();
+        if (string.IsNullOrWhiteSpace(notebook))
+            throw new McpException("A notebook is required to create a page.");
+        if (string.IsNullOrWhiteSpace(section))
+            throw new McpException("A section is required to create a page.");
+        if (string.IsNullOrWhiteSpace(title))
+            throw new McpException("A title is required to create a page.");
+
+        // The CLI creates the page but doesn't apply the title, so the new page has to be found by
+        // diffing the section's page IDs — its name is "Untitled" and so can't identify it.
+        var before = await ReadPageIds(notebook, section, cancellationToken);
+
+        var temp = NewTempFile();
+        try
+        {
+            await File.WriteAllTextAsync(temp, PageTitleEditor.NewPageXml(title),
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
+            // force: false — this is the CLI's create path; --force means "overwrite an existing page".
+            await RunChecked(OneMoreCommand.PutPage(notebook, section, title, temp, force: false), cancellationToken);
+        }
+        finally
+        {
+            try { File.Delete(temp); } catch { /* best effort */ }
+        }
+
+        var created = (await ReadPageIds(notebook, section, cancellationToken)).Except(before).ToList();
+        if (created.Count == 0)
+            throw new McpException($"The CLI reported success but no page appeared in {notebook}/{section}.");
+        if (created.Count > 1)
+            throw new McpException(
+                $"Expected one new page in {notebook}/{section} but found {created.Count}; leaving them alone " +
+                "rather than guessing which to title.");
+
+        await ApplyTitle(created[0], title, notebook, section, cancellationToken);
+        _log.LogInformation("Created page '{Title}' in '{Notebook}/{Section}'.", title, notebook, section);
+        return $"Created '{title}' (empty — the CLI cannot add body text to a new page).";
     }
 
     [McpServerTool(Name = "add_hashtag")]
@@ -183,20 +231,6 @@ public sealed class OneMoreTools
         EnsureWritesAllowed();
         await RunChecked(OneMoreCommand.RemoveHashtag(tags, notebook, section, page), cancellationToken);
         return "Hashtag(s) removed.";
-    }
-
-    [McpServerTool(Name = "insert_toc")]
-    [Description("Insert (or refresh) a table of contents on a page. Requires notebook + section + page, and writes to be enabled.")]
-    public async Task<string> InsertToc(
-        [Description("Notebook name.")] string notebook,
-        [Description("Section name ('/'-delimited).")] string section,
-        [Description("Page name to insert the TOC on.")] string page,
-        [Description("Refresh an existing TOC instead of inserting a new one.")] bool refresh = false,
-        CancellationToken cancellationToken = default)
-    {
-        EnsureWritesAllowed();
-        await RunChecked(OneMoreCommand.InsertToc(notebook, section, page, refresh), cancellationToken);
-        return refresh ? "Table of contents refreshed." : "Table of contents inserted.";
     }
 
     [McpServerTool(Name = "export")]
@@ -333,6 +367,77 @@ public sealed class OneMoreTools
         }
     }
 
+    /// <summary>Lists the page IDs in a section, used to spot which page a create actually produced.</summary>
+    private async Task<IReadOnlyList<string>> ReadPageIds(string notebook, string section, CancellationToken cancellationToken)
+    {
+        var xml = await ReadContent(OneMoreCommand.GetHierarchy(notebook, section), cancellationToken);
+        try
+        {
+            return XDocument.Parse(xml)
+                .Descendants(OneNoteSchema.Ns + "Page")
+                .Select(p => (string?)p.Attribute("ID"))
+                .Where(id => !string.IsNullOrEmpty(id))
+                .Select(id => id!)
+                .ToList();
+        }
+        catch (XmlException ex)
+        {
+            throw new McpException($"Could not read the pages in {notebook}/{section}.", ex);
+        }
+    }
+
+    /// <summary>
+    /// Titles a freshly created page. The page is reached by ID rather than name — a new page is called
+    /// "Untitled", which isn't unique — so it's navigated to and read as the current page, then written
+    /// back with no <c>--page</c>, which makes the CLI target the ID carried in the XML.
+    /// </summary>
+    private async Task ApplyTitle(
+        string pageId, string title, string notebook, string section, CancellationToken cancellationToken)
+    {
+        await RunChecked(OneMoreCommand.Goto(pageId), cancellationToken);
+
+        // Read the page as OneNote now holds it: the write must carry the objectIDs OneNote assigned,
+        // and fresh omHash values, or the update is discarded as unchanged.
+        var pageXml = await ReadPageXml(notebook: null, section: null, page: null, current: true, cancellationToken);
+        if (string.IsNullOrWhiteSpace(pageXml))
+            throw new McpException("The page was created but could not be read back to apply its title.");
+
+        string titled;
+        try { titled = PageTitleEditor.SetTitle(pageXml, title); }
+        catch (ArgumentException ex) { throw new McpException(ex.Message, ex); }
+
+        var temp = NewTempFile();
+        try
+        {
+            await File.WriteAllTextAsync(temp, titled, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
+            // No page name: the CLI updates whichever page the XML's ID refers to.
+            var output = await RunChecked(
+                OneMoreCommand.PutPage(notebook, section, page: null, temp, force: false), cancellationToken);
+            if (!string.IsNullOrWhiteSpace(output))
+                throw new McpException($"OneMore PutPage did not apply the title: {output.Trim()}");
+        }
+        finally
+        {
+            try { File.Delete(temp); } catch { /* best effort */ }
+        }
+
+        if (_options.CurrentValue.SyncAfterWrite)
+        {
+            try { await RunChecked(OneMoreCommand.Sync(notebook), cancellationToken); }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _log.LogWarning(ex, "Auto-sync after create failed for notebook '{Notebook}'.", notebook);
+            }
+        }
+
+        // The CLI reports success even when an update is discarded, so confirm the title actually landed.
+        var afterXml = await ReadPageXml(notebook: null, section: null, page: null, current: true, cancellationToken);
+        if (!string.Equals(PageTitleEditor.GetTitle(afterXml), title, StringComparison.Ordinal))
+            throw new McpException(
+                $"The page was created in {notebook}/{section} but its title was not applied, so it remains " +
+                "'Untitled'. The OneMore CLI reports success even when the update is discarded.");
+    }
+
     private async Task<string> ReadPageXml(string? notebook, string? section, string? page, bool current, CancellationToken cancellationToken)
     {
         if (!current && (string.IsNullOrWhiteSpace(notebook) || string.IsNullOrWhiteSpace(section) || string.IsNullOrWhiteSpace(page)))
@@ -341,17 +446,17 @@ public sealed class OneMoreTools
     }
 
     /// <summary>
-    /// Writes page XML to a temp file, hands it to PutPage --force, and verifies the write actually
-    /// took effect. A clean PutPage exit isn't proof of that: the CLI can retry past a transient COM
-    /// error and still exit 0, and on a OneDrive-synced notebook the follow-up Sync can resolve a
-    /// conflict in favour of the server copy, silently reverting the local change. When the target page
-    /// has been named, it's read back afterwards and compared against a "before" snapshot — a mismatch
-    /// means the write is confirmed; an exact match means it silently no-opped.
+    /// Overwrites an existing page: writes the XML to a temp file, hands it to PutPage --force, and
+    /// verifies the write actually took effect. A clean PutPage exit isn't proof of that — the CLI can
+    /// retry past a transient COM error and still exit 0, and on a OneDrive-synced notebook the follow-up
+    /// Sync can resolve a conflict in favour of the server copy, silently reverting the local change. The
+    /// page is read back afterwards and compared against a "before" snapshot: a mismatch confirms the
+    /// write; an exact match means it silently no-opped. The target must already exist: PutPage's create
+    /// path is broken and leaves an empty "Untitled" page rather than applying the content.
     /// </summary>
     /// <param name="previousXml">
     /// The page's content before this write, if the caller already fetched it (e.g. append_to_page).
-    /// Pass null to have this method fetch it itself; a fetch failure is treated as "page doesn't exist
-    /// yet" and verification is skipped, since that's effectively a page creation.
+    /// Pass null to have this method fetch it itself
     /// </param>
     private async Task PutPageXml(
         string pageXml, string? notebook, string? section, string? page, string? previousXml, CancellationToken cancellationToken)
@@ -364,15 +469,25 @@ public sealed class OneMoreTools
         if (string.IsNullOrWhiteSpace(section))
             throw new McpException("A section is required to write a page.");
 
-        // Notebook and section are guaranteed present by the guard above, so the target page can be read
-        // back whenever it's been named. Without --page the CLI derives the page from the XML's title, and
-        // there's no reliable name to read back by, so verification is skipped.
-        var canVerify = !string.IsNullOrWhiteSpace(page);
-        if (previousXml is null && canVerify)
-        {
-            try { previousXml = await ReadPageXml(notebook, section, page, current: false, cancellationToken); }
-            catch (Exception ex) when (ex is not OperationCanceledException) { /* page likely doesn't exist yet */ }
-        }
+        // This is the overwrite path (PutPage --force), which needs an existing target. PutPage does have a
+        // create path — naming a page without --force — but it's broken: live testing shows it creates the
+        // page shell and applies page-level attributes, then never applies the title or outline, leaving an
+        // empty "Untitled" page. Since the CLI has no delete, refuse a write whose target can't be confirmed
+        // to exist rather than littering the section with junk pages.
+        if (string.IsNullOrWhiteSpace(page))
+            throw new McpException("A page name is required to identify the page to overwrite.");
+
+        // Read failures propagate: the CLI reports a missing page as exit 0 with empty output rather than
+        // an error, so anything that does throw here is a real fault (bad notebook/section, non-zero exit)
+        // and would be misleading if reported as "page not found".
+        previousXml ??= await ReadPageXml(notebook, section, page, current: false, cancellationToken);
+
+        // A missing page reads back as empty rather than failing, so absence shows up as blank content.
+        if (string.IsNullOrWhiteSpace(previousXml))
+            throw new McpException(
+                $"Page '{page}' was not found in {notebook}/{section}. This tool overwrites an existing page and " +
+                "won't create one — the OneMore CLI's create path is currently broken, producing an empty " +
+                "'Untitled' page and discarding the content. Create the page in OneNote first, then write to it.");
 
         // The XML is sent as-is (omHash intact): PutPage accepts it and uses omHash for change detection.
         var temp = NewTempFile();
@@ -396,7 +511,6 @@ public sealed class OneMoreTools
                 }
             }
 
-            if (previousXml is not null && canVerify)
             {
                 string? afterXml = null;
                 try { afterXml = await ReadPageXml(notebook, section, page, current: false, cancellationToken); }

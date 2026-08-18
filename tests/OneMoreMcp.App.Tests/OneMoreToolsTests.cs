@@ -47,41 +47,41 @@ public class OneMoreToolsTests
     }
 
     [Fact]
-    public async Task Create_or_update_page_is_refused_when_writes_disabled()
+    public async Task Update_page_is_refused_when_writes_disabled()
     {
         var (tools, runner) = Build(allowWrites: false);
         var ex = await Assert.ThrowsAsync<McpException>(
-            () => tools.CreateOrUpdatePage(SamplePageXml, notebook: "N", section: "S", page: "P"));
+            () => tools.UpdatePage(SamplePageXml, notebook: "N", section: "S", page: "P"));
         Assert.Contains("Writes are disabled", ex.Message);
         Assert.Empty(runner.Commands); // nothing was executed
     }
 
     [Fact]
-    public async Task Create_or_update_page_runs_putpage_when_writes_enabled()
+    public async Task Update_page_runs_putpage_when_writes_enabled()
     {
         var (tools, runner) = Build(allowWrites: true);
-        await tools.CreateOrUpdatePage(SampleUpdatedPageXml, notebook: "N", section: "S", page: "P");
+        await tools.UpdatePage(SampleUpdatedPageXml, notebook: "N", section: "S", page: "P");
         Assert.Contains(runner.Commands, c => c.Name == "PutPage");
     }
 
     [Fact]
-    public async Task Create_or_update_page_requires_a_notebook()
+    public async Task Update_page_requires_a_notebook()
     {
         // PutPage marks --notebook and --section required; omitting either drops the CLI into an
         // interactive prompt the runner can only catch via an output-overflow kill. Reject upfront.
         var (tools, runner) = Build(allowWrites: true);
         var ex = await Assert.ThrowsAsync<McpException>(
-            () => tools.CreateOrUpdatePage(SamplePageXml, notebook: "  ", section: "S", page: "P"));
+            () => tools.UpdatePage(SamplePageXml, notebook: "  ", section: "S", page: "P"));
         Assert.Contains("notebook", ex.Message);
         Assert.Empty(runner.Commands); // the CLI was never invoked
     }
 
     [Fact]
-    public async Task Create_or_update_page_requires_a_section()
+    public async Task Update_page_requires_a_section()
     {
         var (tools, runner) = Build(allowWrites: true);
         var ex = await Assert.ThrowsAsync<McpException>(
-            () => tools.CreateOrUpdatePage(SamplePageXml, notebook: "N", section: "  ", page: "P"));
+            () => tools.UpdatePage(SamplePageXml, notebook: "N", section: "  ", page: "P"));
         Assert.Contains("section", ex.Message);
         Assert.Empty(runner.Commands);
     }
@@ -140,6 +140,79 @@ public class OneMoreToolsTests
     }
 
     [Fact]
+    public async Task Create_page_creates_then_titles_the_new_page()
+    {
+        var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
+
+        var result = await tools.CreatePage(notebook: "N", section: "S", title: "My Page");
+
+        Assert.Contains("My Page", result);
+        // Snapshot ids, create (no --force), snapshot again, navigate to it, read it, write the title, verify.
+        Assert.Equal(
+            new[] { "GetHierarchy", "PutPage", "GetHierarchy", "Goto", "GetPage", "PutPage", "GetPage" },
+            runner.Commands.Select(c => c.Name).ToArray());
+
+        var create = runner.Commands.Where(c => c.Name == "PutPage").First().Build();
+        Assert.DoesNotContain("--force", create);       // --force is overwrite, not create
+        Assert.Contains("--page", create);
+
+        var titling = runner.Commands.Where(c => c.Name == "PutPage").Last().Build();
+        Assert.DoesNotContain("--page", titling);       // targeted by the ID embedded in the XML
+        Assert.Contains("My Page", runner.LastInfileXml);
+    }
+
+    [Fact]
+    public async Task Create_page_is_gated_by_writes()
+    {
+        var (tools, runner) = Build(allowWrites: false);
+        var ex = await Assert.ThrowsAsync<McpException>(() => tools.CreatePage("N", "S", "T"));
+        Assert.Contains("Writes are disabled", ex.Message);
+        Assert.Empty(runner.Commands);
+    }
+
+    [Fact]
+    public async Task Create_page_requires_notebook_section_and_title()
+    {
+        var (tools, runner) = Build(allowWrites: true);
+        await Assert.ThrowsAsync<McpException>(() => tools.CreatePage("", "S", "T"));
+        await Assert.ThrowsAsync<McpException>(() => tools.CreatePage("N", "  ", "T"));
+        await Assert.ThrowsAsync<McpException>(() => tools.CreatePage("N", "S", " "));
+        Assert.Empty(runner.Commands);
+    }
+
+    [Fact]
+    public async Task Create_page_throws_when_no_page_appears()
+    {
+        // The CLI reports success even when the create silently does nothing.
+        var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
+        runner.SimulateCreateProducesNoPage = true;
+
+        var ex = await Assert.ThrowsAsync<McpException>(() => tools.CreatePage("N", "S", "T"));
+        Assert.Contains("no page appeared", ex.Message);
+    }
+
+    [Fact]
+    public async Task Create_page_refuses_to_guess_when_several_pages_appear()
+    {
+        var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
+        runner.SimulateCreateProducesTwoPages = true;
+
+        var ex = await Assert.ThrowsAsync<McpException>(() => tools.CreatePage("N", "S", "T"));
+        Assert.Contains("Expected one new page", ex.Message);
+    }
+
+    [Fact]
+    public async Task Create_page_throws_when_the_title_does_not_apply()
+    {
+        // The page is created but stays "Untitled" — the exact issue #10 problem 3 symptom.
+        var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
+        runner.SimulateTitleNotApplied = true;
+
+        var ex = await Assert.ThrowsAsync<McpException>(() => tools.CreatePage("N", "S", "T"));
+        Assert.Contains("title was not applied", ex.Message);
+    }
+
+    [Fact]
     public async Task Add_hashtag_is_gated_by_writes()
     {
         var (tools, _) = Build(allowWrites: false);
@@ -147,7 +220,7 @@ public class OneMoreToolsTests
     }
 
     [Fact]
-    public async Task Create_or_update_page_sends_omHash_bearing_xml_unchanged()
+    public async Task Update_page_sends_omHash_bearing_xml_unchanged()
     {
         var (tools, runner) = Build(allowWrites: true);
         const string xml =
@@ -156,7 +229,7 @@ public class OneMoreToolsTests
             "<one:Outline omHash=\"DEF456\"><one:OEChildren>" +
             "<one:OE><one:T><![CDATA[x]]></one:T></one:OE></one:OEChildren></one:Outline></one:Page>";
 
-        await tools.CreateOrUpdatePage(xml, notebook: "N", section: "S", page: "P");
+        await tools.UpdatePage(xml, notebook: "N", section: "S", page: "P");
 
         // The whole point of the 7.3.0 change: omHash flows through to PutPage unstripped.
         Assert.Contains("omHash=\"ABC123\"", runner.LastInfileXml);
@@ -164,11 +237,11 @@ public class OneMoreToolsTests
     }
 
     [Fact]
-    public async Task Create_or_update_page_rejects_malformed_xml()
+    public async Task Update_page_rejects_malformed_xml()
     {
         var (tools, _) = Build(allowWrites: true);
         await Assert.ThrowsAsync<McpException>(
-            () => tools.CreateOrUpdatePage("<one:Page", notebook: "N", section: "S", page: "P"));
+            () => tools.UpdatePage("<one:Page", notebook: "N", section: "S", page: "P"));
     }
 
     [Fact]
@@ -242,7 +315,7 @@ public class OneMoreToolsTests
     public async Task Write_and_action_commands_do_not_use_output()
     {
         var (tools, runner) = Build(allowWrites: true);
-        await tools.CreateOrUpdatePage(SampleUpdatedPageXml, notebook: "N", section: "S", page: "P");
+        await tools.UpdatePage(SampleUpdatedPageXml, notebook: "N", section: "S", page: "P");
         await tools.AddHashtag("#x", notebook: "N");
         await tools.RunCleanup("trim", notebook: "N");
 
@@ -258,7 +331,7 @@ public class OneMoreToolsTests
         runner.Content["PutPage"] = "schema error";   // PutPage prints to stdout while exiting 0
 
         var ex = await Assert.ThrowsAsync<McpException>(
-            () => tools.CreateOrUpdatePage(SamplePageXml, notebook: "N", section: "S", page: "P"));
+            () => tools.UpdatePage(SamplePageXml, notebook: "N", section: "S", page: "P"));
         Assert.Contains("did not apply", ex.Message);
     }
 
@@ -276,27 +349,56 @@ public class OneMoreToolsTests
     }
 
     [Fact]
-    public async Task Create_or_update_page_throws_when_the_write_silently_does_not_take_effect()
+    public async Task Update_page_throws_when_the_write_silently_does_not_take_effect()
     {
         var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
         runner.SimulateNoOpWrite = true;
 
         var ex = await Assert.ThrowsAsync<McpException>(
-            () => tools.CreateOrUpdatePage(SampleUpdatedPageXml, notebook: "N", section: "S", page: "P"));
+            () => tools.UpdatePage(SampleUpdatedPageXml, notebook: "N", section: "S", page: "P"));
         Assert.Contains("unchanged", ex.Message);
     }
 
     [Fact]
-    public async Task Create_or_update_page_skips_verification_when_no_page_is_named()
+    public async Task Update_page_surfaces_a_read_failure_rather_than_calling_it_a_missing_page()
     {
-        // The create path: with no page name the CLI derives the page from the XML's title, so there's no
-        // name to read back by and the no-op check is skipped rather than false-flagging the creation.
+        // A CLI fault while checking the target must not be relabelled "create the page first".
         var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
-        runner.SimulateNoOpWrite = true;
+        runner.ExitCode = 1;
 
-        await tools.CreateOrUpdatePage(SampleUpdatedPageXml, notebook: "N", section: "S");
+        var ex = await Assert.ThrowsAsync<McpException>(
+            () => tools.UpdatePage(SampleUpdatedPageXml, notebook: "N", section: "S", page: "P"));
 
-        Assert.Contains(runner.Commands, c => c.Name == "PutPage");
+        Assert.Contains("GetPage", ex.Message);
+        Assert.DoesNotContain("not found", ex.Message);
+        Assert.DoesNotContain(runner.Commands, c => c.Name == "PutPage");
+    }
+
+    [Fact]
+    public async Task Update_page_refuses_a_page_that_does_not_exist_without_writing()
+    {
+        // The CLI's create path is broken — writing to an unknown name yields an empty "Untitled" page and
+        // discards the content. A missing page reads back as empty, so refuse before PutPage leaves junk.
+        var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
+        runner.PageMissing = true;
+
+        var ex = await Assert.ThrowsAsync<McpException>(
+            () => tools.UpdatePage(SampleUpdatedPageXml, notebook: "N", section: "S", page: "Nope"));
+
+        Assert.Contains("not found", ex.Message);
+        Assert.DoesNotContain(runner.Commands, c => c.Name == "PutPage");
+    }
+
+    [Fact]
+    public async Task Append_to_page_refuses_a_page_that_does_not_exist_without_writing()
+    {
+        var (tools, runner) = Build(syncAfterWrite: false);
+        runner.PageMissing = true;
+
+        await Assert.ThrowsAsync<McpException>(
+            () => tools.AppendToPage("note", notebook: "N", section: "S", page: "Nope", format: "plain"));
+
+        Assert.DoesNotContain(runner.Commands, c => c.Name == "PutPage");
     }
 
     [Fact]
@@ -372,11 +474,11 @@ public class OneMoreToolsTests
     }
 
     [Fact]
-    public async Task Create_or_update_page_auto_syncs_when_enabled()
+    public async Task Update_page_auto_syncs_when_enabled()
     {
-        // Auto-sync lives in the shared PutPageXml, so it must apply to create_or_update_page too.
+        // Auto-sync lives in the shared PutPageXml, so it must apply to update_page too.
         var (tools, runner) = Build(allowWrites: true, syncAfterWrite: true);
-        await tools.CreateOrUpdatePage(SampleUpdatedPageXml, notebook: "N", section: "S", page: "P");
+        await tools.UpdatePage(SampleUpdatedPageXml, notebook: "N", section: "S", page: "P");
 
         // GetPage (before-snapshot) -> PutPage -> Sync -> GetPage (verifies the write took effect).
         Assert.Equal(new[] { "GetPage", "PutPage", "Sync", "GetPage" }, runner.Commands.Select(c => c.Name).ToArray());
@@ -486,6 +588,33 @@ public class OneMoreToolsTests
         /// the silent no-op write from issue #10 (e.g. a OneDrive sync reverting the change).</summary>
         public bool SimulateNoOpWrite { get; set; }
 
+        /// <summary>When true, GetPage returns nothing — how the real CLI reports a page that doesn't exist
+        /// (exit 0, empty output file, no diagnostic on stdout).</summary>
+        public bool PageMissing { get; set; }
+
+        // ---- create_page modelling ----
+        // The real CLI creates a page named "Untitled" without applying the supplied title, so the create
+        // flow finds its page by diffing section IDs, then titles it via a second, ID-targeted write.
+
+        /// <summary>Page IDs currently in the section, as GetHierarchy would report them.</summary>
+        public List<string> SectionPageIds { get; } = new() { "{EXISTING}" };
+
+        /// <summary>When true, the create call exits clean but no page appears.</summary>
+        public bool SimulateCreateProducesNoPage { get; set; }
+
+        /// <summary>When true, the create call produces two pages, so the new one is ambiguous.</summary>
+        public bool SimulateCreateProducesTwoPages { get; set; }
+
+        /// <summary>When true, the title-applying write exits clean but leaves the page untitled.</summary>
+        public bool SimulateTitleNotApplied { get; set; }
+
+        /// <summary>XML of the page GetPage --current returns; set once a page has been created.</summary>
+        public string? CurrentPageXml { get; private set; }
+
+        private const string UntitledPageXml =
+            "<one:Page xmlns:one=\"http://schemas.microsoft.com/office/onenote/2013/onenote\" ID=\"{NEW1}\" name=\"Untitled\">" +
+            "<one:Title><one:OE objectID=\"{O1}\"><one:T><![CDATA[]]></one:T></one:OE></one:Title></one:Page>";
+
         public string? TryResolveCliPath() => "fake-onemore.exe";
 
         public Task<CliResult> RunAsync(OneMoreCommand command, CancellationToken cancellationToken = default)
@@ -500,10 +629,31 @@ public class OneMoreToolsTests
                 var infile = OptionValue(argv, "--infile");
                 if (infile != null) LastInfileXml = File.ReadAllText(infile);
                 if (!SimulateNoOpWrite) PersistedPageXml = LastInfileXml;
+
+                var named = OptionValue(argv, "--page") != null;
+                var forced = argv.Contains("--force");
+                if (named && !forced)
+                {
+                    // Create: a page appears, but untitled — the supplied title is discarded.
+                    if (!SimulateCreateProducesNoPage)
+                    {
+                        SectionPageIds.Add("{NEW1}");
+                        if (SimulateCreateProducesTwoPages) SectionPageIds.Add("{NEW2}");
+                        CurrentPageXml = UntitledPageXml;
+                    }
+                }
+                else if (!named && CurrentPageXml != null && !SimulateTitleNotApplied)
+                {
+                    // Title write, targeted by the ID embedded in the XML.
+                    CurrentPageXml = LastInfileXml;
+                }
             }
 
             var payload = Content.TryGetValue(command.Name, out var c) ? c
-                : command.Name == "GetPage" ? (PersistedPageXml ?? SamplePageXml) : "";
+                : command.Name == "GetPage" && argv.Contains("--current") && CurrentPageXml != null ? CurrentPageXml
+                : command.Name == "GetPage" ? (PageMissing ? "" : PersistedPageXml ?? SamplePageXml)
+                : command.Name == "GetHierarchy" ? SectionXml()
+                : "";
 
             // With --output the CLI writes the payload to the file and stdout carries only diagnostics;
             // without it, the payload comes back on stdout (write/action commands).
@@ -516,6 +666,11 @@ public class OneMoreToolsTests
 
             return Task.FromResult(new CliResult(ExitCode, payload, ""));
         }
+
+        private string SectionXml() =>
+            "<one:Section xmlns:one=\"http://schemas.microsoft.com/office/onenote/2013/onenote\" name=\"S\">" +
+            string.Concat(SectionPageIds.Select(id => $"<one:Page ID=\"{id}\" name=\"P\" />")) +
+            "</one:Section>";
 
         private static string? OptionValue(IReadOnlyList<string> argv, string flag)
         {

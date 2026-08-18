@@ -104,12 +104,6 @@ public sealed class OneMoreCommand
         new OneMoreCommand("RemoveHashtag")
             .Option("notebook", notebook).Option("section", section).Option("page", page).Option("tags", tags);
 
-    // InsertToc requires --notebook, --section, --page; --refresh is a switch (present = refresh an
-    // existing TOC, absent = build a new one).
-    public static OneMoreCommand InsertToc(string? notebook, string? section, string? page, bool refresh) =>
-        new OneMoreCommand("InsertToc")
-            .Option("notebook", notebook).Option("section", section).Option("page", page).Switch("refresh", refresh);
-
     public static OneMoreCommand Export(string outpath, string format, string? pageId = null, bool backup = false) =>
         new OneMoreCommand("Export").Option("outpath", outpath).Option("format", format).Option("pageId", pageId).Switch("backup", backup);
 

@@ -103,17 +103,6 @@ public class OneMoreCommandTests
     }
 
     [Fact]
-    public void InsertToc_includes_refresh_switch_only_when_true()
-    {
-        Assert.Equal(
-            new[] { "InsertToc", "--notebook", "B", "--section", "S", "--page", "P" },
-            OneMoreCommand.InsertToc("B", "S", "P", refresh: false).Build());
-        Assert.Equal(
-            new[] { "InsertToc", "--notebook", "B", "--section", "S", "--page", "P", "--refresh" },
-            OneMoreCommand.InsertToc("B", "S", "P", refresh: true).Build());
-    }
-
-    [Fact]
     public void Export_includes_format_and_optional_pageId()
     {
         var argv = OneMoreCommand.Export(outpath: @"C:\out", format: "PDF", pageId: "{123}").Build();

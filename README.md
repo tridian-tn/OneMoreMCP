@@ -91,12 +91,12 @@ Edit it (tray menu → **Open configuration…**). `CliPath`, `AllowWrites`, `De
   (`River\OneMoreAddIn`). If that path doesn't exist (or is blank), the app auto-detects it under
   Program Files, Program Files x86, and LocalAppData — trying both the current `River\OneMoreAddIn`
   layout and the older documented `River Software\OneMore` one. Set it explicitly for a non-standard install.
-- **AllowWrites**: master gate for content-changing tools (create/overwrite pages, hashtags, TOC,
+- **AllowWrites**: master gate for content-changing tools (overwrite pages, hashtags, TOC,
   export, cleanup). **Off by default**, so a fresh install is read-only. The append-only
   `append_to_page` tool is exempt — see [Appending vs. writing](#appending-vs-writing).
 - **DefaultFormat**: how read tools return page/hierarchy content — `markdown` (default, compact) or
   `xml` (raw OneNote XML). Each read tool can override this per call.
-- **SyncAfterWrite**: after a content write (`append_to_page` / `create_or_update_page`), sync the
+- **SyncAfterWrite**: after a content write (`append_to_page` / `update_page`), sync the
   affected notebook to storage so the change reliably lands and is visible on the next read. On by
   default; best-effort (a failed sync is logged, not surfaced as a write failure).
 - **CommandTimeoutSeconds**: how long a single CLI call may run before it's cancelled. OneMore
@@ -229,9 +229,9 @@ OneMoreMcp.exe --disable-autostart
 | `search_hashtags` | Search OneNote hashtags; optional notebook/section/page scope. | — |
 | `sync` | Sync a notebook's pending changes to storage (flush recent edits). | — |
 | `append_to_page` | **Append** text (markdown/html/plain) to a page. Fetches, adds, writes back — never sends the page's existing content to the model, never overwrites. | **ungated** |
-| `create_or_update_page` | Create/overwrite a page from raw OneNote page XML (as `get_page` format=xml). | gated |
+| `update_page` | Overwrite an **existing** page from raw OneNote page XML (as `get_page` format=xml). Cannot create pages — see below. | gated |
+| `create_page` | Create a new page with a title. The page is created **empty** and can't be given body text — see below. | gated |
 | `add_hashtag` / `remove_hashtag` | Add/remove hashtags on the current page(s). | gated |
-| `insert_toc` | Insert or refresh a table of contents. | gated |
 | `export` | Export pages to a folder (HTML/PDF/Word/XML/Markdown/OneNote); confined to `ExportRoot` if set. | gated |
 | `archive` | Archive a notebook (or section) to a `.zip`; confined to `ExportRoot` if set. | gated |
 | `goto` | Navigate OneNote to a page/object. | — |
@@ -243,8 +243,36 @@ OneMoreMcp.exe --disable-autostart
 `list_hierarchy`, `get_page`, and `search` return **compact Markdown by default** — OneNote's native
 XML is verbose and namespaced, and sending it verbatim is token-heavy. Pass `format: "xml"` (or set
 `DefaultFormat` to `xml`) to get the raw OneNote page/hierarchy XML instead — useful when you intend
-to edit it and write it back with `create_or_update_page`. The Markdown projection is lossy on
+to edit it and write it back with `update_page`. The Markdown projection is lossy on
 styling by design: it preserves structure and text, not formatting.
+
+## New pages can be created, but not filled
+
+`PutPage` documents a create path — naming a page **without** `--force` *"will attempt to create a
+page of that name"* — but a single call doesn't do what it says. Live testing against OneMore 7.3.0
+shows the page shell is created while **the title and outline are silently discarded**, leaving an
+empty **"Untitled"** page. `create_page` works around this in two steps: it creates the shell, finds
+the new page by diffing the section's page IDs (its name is "Untitled", so the name can't identify
+it), then applies the title with a second write targeted by the page's ID. That part works.
+
+**Body content can't be added at all.** OneNote ignores a new top-level `one:Outline`, so a page that
+has no outline can't be given one — verified on both freshly created and long-standing pages, with
+explicit `Position`/`Size`, with a body `quickStyleIndex`, and with `omHash` stripped so nothing was
+pruned. `InsertToc` — an unrelated command that builds content — is equally silent. Modifying content
+that already exists works fine, which is why `append_to_page` and `update_page` are reliable.
+
+So a page created here stays empty until someone types in it in OneNote; after that, the normal write
+tools work on it. Because the CLI has no delete command, failed attempts leave junk "Untitled" pages
+behind, so `update_page` checks its target exists before writing rather than producing one.
+
+Two faults in OneMore's own source explain the silence
+([`PutPageCommand.cs`](https://github.com/stevencohn/OneMore/blob/main/OneMore/Cli/Commands/PutPageCommand.cs)):
+
+- `PutPageCommand` discards the `bool` returned by `OneNote.Update`, so a failed content update is
+  still reported as success.
+- `Page.OptimizeForSave` drops any child element whose `omHash` still matches its content — a
+  deliberate "unchanged, skip" optimisation which also means **re-sending a stale copy of a page
+  silently does nothing**. Always write back XML you've just read.
 
 ## Appending vs. writing
 
@@ -255,7 +283,7 @@ There are two ways to change a page, with deliberately different safety models:
   paragraph(s), and writes it back. The existing content never becomes LLM tokens and can never be
   overwritten — only added to. This is the recommended, cheap, low-risk way to have an LLM add notes.
 - **Everything else that changes content is gated** behind `AllowWrites` (off by default):
-  `create_or_update_page` (which *overwrites* a page), `add_hashtag`/`remove_hashtag`, `insert_toc`,
+  `update_page` (which *overwrites* a page), `create_page`, `add_hashtag`/`remove_hashtag`,
   `export`, and `run_cleanup`. Enable them by setting `"AllowWrites": true` in the config. Gated
   tools return a clear "writes are disabled" error until you do.
 
@@ -264,7 +292,7 @@ There are two ways to change a page, with deliberately different safety models:
 > [#2324][2324]). This server reads page/hierarchy content via the CLI's `--output <file>` option to
 > avoid stdout/console-encoding corruption of non-ASCII content, writes page XML with its `omHash`
 > attributes intact, and uses bare-switch booleans — all as of 7.3.0. On 7.2.0 or earlier the read
-> commands fail. Content-writes (`append_to_page`, `create_or_update_page`, hashtags, `insert_toc`,
+> commands fail. Content-writes (`append_to_page`, `update_page`, hashtags,
 > `run_cleanup`) are **verified working on 7.3.0** (append round-trips and persists).
 >
 > [2322]: https://github.com/stevencohn/OneMore/issues/2322
@@ -346,9 +374,9 @@ The server is a **process orchestrator**: each tool builds a `OneMoreCli.exe` in
 | `search_hashtags` | `SearchHashtags --query [--allTags] [--notebook] [--section] [--page]` |
 | `sync` | `Sync --notebook` |
 | `append_to_page` | `GetPage` (raw) → local append → `PutPage --infile <temp> --force` → `Sync` (if `SyncAfterWrite`) |
-| `create_or_update_page` | `PutPage [--notebook] [--section] [--page] --infile <temp> --force` |
+| `create_page` | `GetHierarchy` → `PutPage --notebook --section --page --infile` (no `--force`) → `GetHierarchy` → `Goto --pageId` → `GetPage --current` → `PutPage --infile` (no `--page`, targets the embedded ID) |
+| `update_page` | `GetPage` (existence check) → `PutPage --notebook --section --page --infile <temp> --force` → `Sync` (if `SyncAfterWrite`) → `GetPage` (verify) |
 | `add_hashtag` / `remove_hashtag` | `AddHashtag --tags` / `RemoveHashtag --tags` |
-| `insert_toc` | `InsertToc [--page] [--refresh]` |
 | `export` | `Export --outpath --format [--pageId] [--backup]` |
 | `archive` | `Archive --notebook --outfile [--section]` |
 | `goto` | `Goto --pageId [--objectId]` |

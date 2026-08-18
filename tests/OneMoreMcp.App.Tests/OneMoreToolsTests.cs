@@ -51,7 +51,7 @@ public class OneMoreToolsTests
     {
         var (tools, runner) = Build(allowWrites: false);
         var ex = await Assert.ThrowsAsync<McpException>(
-            () => tools.CreateOrUpdatePage(SamplePageXml, section: "S", page: "P"));
+            () => tools.CreateOrUpdatePage(SamplePageXml, notebook: "N", section: "S", page: "P"));
         Assert.Contains("Writes are disabled", ex.Message);
         Assert.Empty(runner.Commands); // nothing was executed
     }
@@ -65,14 +65,36 @@ public class OneMoreToolsTests
     }
 
     [Fact]
-    public async Task Create_or_update_page_requires_a_notebook_when_section_or_page_is_given()
+    public async Task Create_or_update_page_requires_a_notebook()
     {
-        // Without --notebook the CLI rejects a --section/--page-scoped PutPage by falling into an
-        // interactive prompt; reject it upfront instead of letting the runner time out on output overflow.
-        var (tools, _) = Build(allowWrites: true);
+        // PutPage marks --notebook and --section required; omitting either drops the CLI into an
+        // interactive prompt the runner can only catch via an output-overflow kill. Reject upfront.
+        var (tools, runner) = Build(allowWrites: true);
         var ex = await Assert.ThrowsAsync<McpException>(
-            () => tools.CreateOrUpdatePage(SamplePageXml, section: "S", page: "P"));
+            () => tools.CreateOrUpdatePage(SamplePageXml, notebook: "  ", section: "S", page: "P"));
         Assert.Contains("notebook", ex.Message);
+        Assert.Empty(runner.Commands); // the CLI was never invoked
+    }
+
+    [Fact]
+    public async Task Create_or_update_page_requires_a_section()
+    {
+        var (tools, runner) = Build(allowWrites: true);
+        var ex = await Assert.ThrowsAsync<McpException>(
+            () => tools.CreateOrUpdatePage(SamplePageXml, notebook: "N", section: "  ", page: "P"));
+        Assert.Contains("section", ex.Message);
+        Assert.Empty(runner.Commands);
+    }
+
+    [Fact]
+    public async Task Append_to_page_rejects_a_blank_section_before_invoking_the_cli()
+    {
+        // append_to_page reads the page first, so a blank section is caught by ReadPageXml's guard rather
+        // than PutPageXml's — either way it must fail before any command reaches the CLI.
+        var (tools, runner) = Build();
+        await Assert.ThrowsAsync<McpException>(
+            () => tools.AppendToPage("note", notebook: "N", section: "  ", page: "P", format: "plain"));
+        Assert.Empty(runner.Commands);
     }
 
     [Fact]
@@ -265,10 +287,10 @@ public class OneMoreToolsTests
     }
 
     [Fact]
-    public async Task Create_or_update_page_skips_verification_when_the_page_is_not_fully_identified()
+    public async Task Create_or_update_page_skips_verification_when_no_page_is_named()
     {
-        // No page name given (title/ID comes from the XML instead) — the target page can't be read back
-        // deterministically, so the no-op check is skipped rather than false-flagging a page creation.
+        // The create path: with no page name the CLI derives the page from the XML's title, so there's no
+        // name to read back by and the no-op check is skipped rather than false-flagging the creation.
         var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
         runner.SimulateNoOpWrite = true;
 

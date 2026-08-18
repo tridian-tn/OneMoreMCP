@@ -360,6 +360,21 @@ public class OneMoreToolsTests
     }
 
     [Fact]
+    public async Task Update_page_surfaces_a_read_failure_rather_than_calling_it_a_missing_page()
+    {
+        // A CLI fault while checking the target must not be relabelled "create the page first".
+        var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
+        runner.ExitCode = 1;
+
+        var ex = await Assert.ThrowsAsync<McpException>(
+            () => tools.UpdatePage(SampleUpdatedPageXml, notebook: "N", section: "S", page: "P"));
+
+        Assert.Contains("GetPage", ex.Message);
+        Assert.DoesNotContain("not found", ex.Message);
+        Assert.DoesNotContain(runner.Commands, c => c.Name == "PutPage");
+    }
+
+    [Fact]
     public async Task Update_page_refuses_a_page_that_does_not_exist_without_writing()
     {
         // The CLI's create path is broken — writing to an unknown name yields an empty "Untitled" page and

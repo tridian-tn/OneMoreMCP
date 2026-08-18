@@ -477,11 +477,10 @@ public sealed class OneMoreTools
         if (string.IsNullOrWhiteSpace(page))
             throw new McpException("A page name is required to identify the page to overwrite.");
 
-        if (previousXml is null)
-        {
-            try { previousXml = await ReadPageXml(notebook, section, page, current: false, cancellationToken); }
-            catch (Exception ex) when (ex is not OperationCanceledException) { /* treated as "not found" below */ }
-        }
+        // Read failures propagate: the CLI reports a missing page as exit 0 with empty output rather than
+        // an error, so anything that does throw here is a real fault (bad notebook/section, non-zero exit)
+        // and would be misleading if reported as "page not found".
+        previousXml ??= await ReadPageXml(notebook, section, page, current: false, cancellationToken);
 
         // A missing page reads back as empty rather than failing, so absence shows up as blank content.
         if (string.IsNullOrWhiteSpace(previousXml))

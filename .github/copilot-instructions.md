@@ -46,7 +46,7 @@ against `OneMoreCli.exe` directly; **guard them, and flag any change that reintr
 - **Append is ungated; everything else that writes is gated.** `append_to_page` is append-only — it
   fetches the page locally, adds text, and writes back, never exposing existing content and never
   overwriting — so it is exempt from `AllowWrites`. All other content-changing tools
-  (`create_or_update_page`, hashtags, `insert_toc`, `run_cleanup`, `export`) must call
+  (`update_page`, hashtags, `insert_toc`, `run_cleanup`, `export`) must call
   `EnsureWritesAllowed()`. Keep that distinction.
 - **Known upstream limitation:** OneMore content-writes (`UpdatePageContent`) currently don't persist —
   tracked as stevencohn/OneMore#2322. Don't attempt to "fix" this in the wrapper; it's external. The

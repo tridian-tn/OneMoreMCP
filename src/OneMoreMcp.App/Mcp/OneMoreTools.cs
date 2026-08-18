@@ -135,16 +135,15 @@ public sealed class OneMoreTools
 
     // ---------------- Write (gated) ----------------
 
-    [McpServerTool(Name = "create_or_update_page")]
-    [Description("Create or overwrite a page from raw OneNote page XML (as returned by get_page with format='xml'). "
-        + "To OVERWRITE an existing page, pass its name as 'page'. To CREATE a new page, OMIT 'page' — the title "
-        + "comes from the XML; naming a page that doesn't exist yet creates an empty 'Untitled' page instead. "
-        + "Requires writes to be enabled. For simply adding text, use append_to_page instead.")]
-    public async Task<string> CreateOrUpdatePage(
+    [McpServerTool(Name = "update_page")]
+    [Description("OVERWRITE an EXISTING OneNote page from raw page XML (as returned by get_page with format='xml'). "
+        + "Cannot create pages — the OneMore CLI has no page-creation command, so the page must already exist; "
+        + "create it in OneNote first. Requires writes to be enabled. For simply adding text, use append_to_page.")]
+    public async Task<string> UpdatePage(
         [Description("The full OneNote page XML (one:Page document).")] string pageXml,
-        [Description("Notebook name to place the page in.")] string notebook,
-        [Description("Section name to place the page in ('/'-delimited).")] string section,
-        [Description("Name of the EXISTING page to overwrite. Omit to create a new page from the XML's title.")] string? page = null,
+        [Description("Notebook name containing the page.")] string notebook,
+        [Description("Section name containing the page ('/'-delimited).")] string section,
+        [Description("Name of the existing page to overwrite.")] string page,
         CancellationToken cancellationToken = default)
     {
         EnsureWritesAllowed();
@@ -154,7 +153,7 @@ public sealed class OneMoreTools
         try { XDocument.Parse(pageXml); }
         catch (XmlException ex) { throw new McpException("The page XML could not be parsed.", ex); }
         await PutPageXml(pageXml, notebook, section, page, previousXml: null, cancellationToken);
-        return "Page written.";
+        return "Page updated.";
     }
 
     [McpServerTool(Name = "add_hashtag")]
@@ -341,17 +340,17 @@ public sealed class OneMoreTools
     }
 
     /// <summary>
-    /// Writes page XML to a temp file, hands it to PutPage --force, and verifies the write actually
-    /// took effect. A clean PutPage exit isn't proof of that: the CLI can retry past a transient COM
-    /// error and still exit 0, and on a OneDrive-synced notebook the follow-up Sync can resolve a
-    /// conflict in favour of the server copy, silently reverting the local change. When the target page
-    /// has been named, it's read back afterwards and compared against a "before" snapshot — a mismatch
-    /// means the write is confirmed; an exact match means it silently no-opped.
+    /// Overwrites an existing page: writes the XML to a temp file, hands it to PutPage --force, and
+    /// verifies the write actually took effect. A clean PutPage exit isn't proof of that — the CLI can
+    /// retry past a transient COM error and still exit 0, and on a OneDrive-synced notebook the follow-up
+    /// Sync can resolve a conflict in favour of the server copy, silently reverting the local change. The
+    /// page is read back afterwards and compared against a "before" snapshot: a mismatch confirms the
+    /// write; an exact match means it silently no-opped. The target must already exist — PutPage can't
+    /// create, and attempting it leaves an empty "Untitled" page behind.
     /// </summary>
     /// <param name="previousXml">
     /// The page's content before this write, if the caller already fetched it (e.g. append_to_page).
-    /// Pass null to have this method fetch it itself; a fetch failure is treated as "page doesn't exist
-    /// yet" and verification is skipped, since that's effectively a page creation.
+    /// Pass null to have this method fetch it itself
     /// </param>
     private async Task PutPageXml(
         string pageXml, string? notebook, string? section, string? page, string? previousXml, CancellationToken cancellationToken)
@@ -364,15 +363,28 @@ public sealed class OneMoreTools
         if (string.IsNullOrWhiteSpace(section))
             throw new McpException("A section is required to write a page.");
 
-        // Notebook and section are guaranteed present by the guard above, so the target page can be read
-        // back whenever it's been named. Without --page the CLI derives the page from the XML's title, and
-        // there's no reliable name to read back by, so verification is skipped.
-        var canVerify = !string.IsNullOrWhiteSpace(page);
-        if (previousXml is null && canVerify)
+        // PutPage can only UPDATE an existing page — the CLI has no page-creation command. Naming a page
+        // that doesn't exist makes it create an empty "Untitled" shell and drop the supplied content on
+        // the floor, and omitting --page writes nothing at all. Neither reports an error, so refuse a
+        // write whose target can't be confirmed to exist rather than leaving junk pages behind.
+        if (string.IsNullOrWhiteSpace(page))
+            throw new McpException(
+                "A page name is required. The OneMore CLI can only overwrite an existing page — it has no " +
+                "command to create one, and a write with no page named silently does nothing. Create the page " +
+                "in OneNote first, then write to it by name.");
+
+        if (previousXml is null)
         {
             try { previousXml = await ReadPageXml(notebook, section, page, current: false, cancellationToken); }
-            catch (Exception ex) when (ex is not OperationCanceledException) { /* page likely doesn't exist yet */ }
+            catch (Exception ex) when (ex is not OperationCanceledException) { /* treated as "not found" below */ }
         }
+
+        // A missing page reads back as empty rather than failing, so absence shows up as blank content.
+        if (string.IsNullOrWhiteSpace(previousXml))
+            throw new McpException(
+                $"Page '{page}' was not found in {notebook}/{section}. The OneMore CLI cannot create pages — " +
+                "writing to a name that doesn't exist produces an empty 'Untitled' page and discards the " +
+                "content. Create the page in OneNote first, then write to it by name.");
 
         // The XML is sent as-is (omHash intact): PutPage accepts it and uses omHash for change detection.
         var temp = NewTempFile();
@@ -396,7 +408,6 @@ public sealed class OneMoreTools
                 }
             }
 
-            if (previousXml is not null && canVerify)
             {
                 string? afterXml = null;
                 try { afterXml = await ReadPageXml(notebook, section, page, current: false, cancellationToken); }

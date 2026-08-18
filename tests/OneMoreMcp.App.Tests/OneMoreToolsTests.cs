@@ -87,12 +87,14 @@ public class OneMoreToolsTests
     }
 
     [Fact]
-    public async Task Append_to_page_requires_a_section()
+    public async Task Append_to_page_rejects_a_blank_section_before_invoking_the_cli()
     {
-        // append_to_page shares PutPageXml, so the same required-argument guard must apply there.
-        var (tools, _) = Build();
+        // append_to_page reads the page first, so a blank section is caught by ReadPageXml's guard rather
+        // than PutPageXml's — either way it must fail before any command reaches the CLI.
+        var (tools, runner) = Build();
         await Assert.ThrowsAsync<McpException>(
             () => tools.AppendToPage("note", notebook: "N", section: "  ", page: "P", format: "plain"));
+        Assert.Empty(runner.Commands);
     }
 
     [Fact]

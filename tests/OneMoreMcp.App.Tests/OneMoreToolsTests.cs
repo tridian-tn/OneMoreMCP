@@ -140,6 +140,79 @@ public class OneMoreToolsTests
     }
 
     [Fact]
+    public async Task Create_page_creates_then_titles_the_new_page()
+    {
+        var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
+
+        var result = await tools.CreatePage(notebook: "N", section: "S", title: "My Page");
+
+        Assert.Contains("My Page", result);
+        // Snapshot ids, create (no --force), snapshot again, navigate to it, read it, write the title, verify.
+        Assert.Equal(
+            new[] { "GetHierarchy", "PutPage", "GetHierarchy", "Goto", "GetPage", "PutPage", "GetPage" },
+            runner.Commands.Select(c => c.Name).ToArray());
+
+        var create = runner.Commands.Where(c => c.Name == "PutPage").First().Build();
+        Assert.DoesNotContain("--force", create);       // --force is overwrite, not create
+        Assert.Contains("--page", create);
+
+        var titling = runner.Commands.Where(c => c.Name == "PutPage").Last().Build();
+        Assert.DoesNotContain("--page", titling);       // targeted by the ID embedded in the XML
+        Assert.Contains("My Page", runner.LastInfileXml);
+    }
+
+    [Fact]
+    public async Task Create_page_is_gated_by_writes()
+    {
+        var (tools, runner) = Build(allowWrites: false);
+        var ex = await Assert.ThrowsAsync<McpException>(() => tools.CreatePage("N", "S", "T"));
+        Assert.Contains("Writes are disabled", ex.Message);
+        Assert.Empty(runner.Commands);
+    }
+
+    [Fact]
+    public async Task Create_page_requires_notebook_section_and_title()
+    {
+        var (tools, runner) = Build(allowWrites: true);
+        await Assert.ThrowsAsync<McpException>(() => tools.CreatePage("", "S", "T"));
+        await Assert.ThrowsAsync<McpException>(() => tools.CreatePage("N", "  ", "T"));
+        await Assert.ThrowsAsync<McpException>(() => tools.CreatePage("N", "S", " "));
+        Assert.Empty(runner.Commands);
+    }
+
+    [Fact]
+    public async Task Create_page_throws_when_no_page_appears()
+    {
+        // The CLI reports success even when the create silently does nothing.
+        var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
+        runner.SimulateCreateProducesNoPage = true;
+
+        var ex = await Assert.ThrowsAsync<McpException>(() => tools.CreatePage("N", "S", "T"));
+        Assert.Contains("no page appeared", ex.Message);
+    }
+
+    [Fact]
+    public async Task Create_page_refuses_to_guess_when_several_pages_appear()
+    {
+        var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
+        runner.SimulateCreateProducesTwoPages = true;
+
+        var ex = await Assert.ThrowsAsync<McpException>(() => tools.CreatePage("N", "S", "T"));
+        Assert.Contains("Expected one new page", ex.Message);
+    }
+
+    [Fact]
+    public async Task Create_page_throws_when_the_title_does_not_apply()
+    {
+        // The page is created but stays "Untitled" — the exact issue #10 problem 3 symptom.
+        var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
+        runner.SimulateTitleNotApplied = true;
+
+        var ex = await Assert.ThrowsAsync<McpException>(() => tools.CreatePage("N", "S", "T"));
+        Assert.Contains("title was not applied", ex.Message);
+    }
+
+    [Fact]
     public async Task Add_hashtag_is_gated_by_writes()
     {
         var (tools, _) = Build(allowWrites: false);
@@ -504,6 +577,29 @@ public class OneMoreToolsTests
         /// (exit 0, empty output file, no diagnostic on stdout).</summary>
         public bool PageMissing { get; set; }
 
+        // ---- create_page modelling ----
+        // The real CLI creates a page named "Untitled" without applying the supplied title, so the create
+        // flow finds its page by diffing section IDs, then titles it via a second, ID-targeted write.
+
+        /// <summary>Page IDs currently in the section, as GetHierarchy would report them.</summary>
+        public List<string> SectionPageIds { get; } = new() { "{EXISTING}" };
+
+        /// <summary>When true, the create call exits clean but no page appears.</summary>
+        public bool SimulateCreateProducesNoPage { get; set; }
+
+        /// <summary>When true, the create call produces two pages, so the new one is ambiguous.</summary>
+        public bool SimulateCreateProducesTwoPages { get; set; }
+
+        /// <summary>When true, the title-applying write exits clean but leaves the page untitled.</summary>
+        public bool SimulateTitleNotApplied { get; set; }
+
+        /// <summary>XML of the page GetPage --current returns; set once a page has been created.</summary>
+        public string? CurrentPageXml { get; private set; }
+
+        private const string UntitledPageXml =
+            "<one:Page xmlns:one=\"http://schemas.microsoft.com/office/onenote/2013/onenote\" ID=\"{NEW1}\" name=\"Untitled\">" +
+            "<one:Title><one:OE objectID=\"{O1}\"><one:T><![CDATA[]]></one:T></one:OE></one:Title></one:Page>";
+
         public string? TryResolveCliPath() => "fake-onemore.exe";
 
         public Task<CliResult> RunAsync(OneMoreCommand command, CancellationToken cancellationToken = default)
@@ -518,10 +614,31 @@ public class OneMoreToolsTests
                 var infile = OptionValue(argv, "--infile");
                 if (infile != null) LastInfileXml = File.ReadAllText(infile);
                 if (!SimulateNoOpWrite) PersistedPageXml = LastInfileXml;
+
+                var named = OptionValue(argv, "--page") != null;
+                var forced = argv.Contains("--force");
+                if (named && !forced)
+                {
+                    // Create: a page appears, but untitled — the supplied title is discarded.
+                    if (!SimulateCreateProducesNoPage)
+                    {
+                        SectionPageIds.Add("{NEW1}");
+                        if (SimulateCreateProducesTwoPages) SectionPageIds.Add("{NEW2}");
+                        CurrentPageXml = UntitledPageXml;
+                    }
+                }
+                else if (!named && CurrentPageXml != null && !SimulateTitleNotApplied)
+                {
+                    // Title write, targeted by the ID embedded in the XML.
+                    CurrentPageXml = LastInfileXml;
+                }
             }
 
             var payload = Content.TryGetValue(command.Name, out var c) ? c
-                : command.Name == "GetPage" ? (PageMissing ? "" : PersistedPageXml ?? SamplePageXml) : "";
+                : command.Name == "GetPage" && argv.Contains("--current") && CurrentPageXml != null ? CurrentPageXml
+                : command.Name == "GetPage" ? (PageMissing ? "" : PersistedPageXml ?? SamplePageXml)
+                : command.Name == "GetHierarchy" ? SectionXml()
+                : "";
 
             // With --output the CLI writes the payload to the file and stdout carries only diagnostics;
             // without it, the payload comes back on stdout (write/action commands).
@@ -534,6 +651,11 @@ public class OneMoreToolsTests
 
             return Task.FromResult(new CliResult(ExitCode, payload, ""));
         }
+
+        private string SectionXml() =>
+            "<one:Section xmlns:one=\"http://schemas.microsoft.com/office/onenote/2013/onenote\" name=\"S\">" +
+            string.Concat(SectionPageIds.Select(id => $"<one:Page ID=\"{id}\" name=\"P\" />")) +
+            "</one:Section>";
 
         private static string? OptionValue(IReadOnlyList<string> argv, string flag)
         {

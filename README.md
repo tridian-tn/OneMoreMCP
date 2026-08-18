@@ -232,7 +232,6 @@ OneMoreMcp.exe --disable-autostart
 | `update_page` | Overwrite an **existing** page from raw OneNote page XML (as `get_page` format=xml). Cannot create pages — see below. | gated |
 | `create_page` | Create a new page with a title. The page is created **empty** and can't be given body text — see below. | gated |
 | `add_hashtag` / `remove_hashtag` | Add/remove hashtags on the current page(s). | gated |
-| `insert_toc` | Insert or refresh a table of contents. | gated |
 | `export` | Export pages to a folder (HTML/PDF/Word/XML/Markdown/OneNote); confined to `ExportRoot` if set. | gated |
 | `archive` | Archive a notebook (or section) to a `.zip`; confined to `ExportRoot` if set. | gated |
 | `goto` | Navigate OneNote to a page/object. | — |
@@ -284,7 +283,7 @@ There are two ways to change a page, with deliberately different safety models:
   paragraph(s), and writes it back. The existing content never becomes LLM tokens and can never be
   overwritten — only added to. This is the recommended, cheap, low-risk way to have an LLM add notes.
 - **Everything else that changes content is gated** behind `AllowWrites` (off by default):
-  `update_page` (which *overwrites* a page), `create_page`, `add_hashtag`/`remove_hashtag`, `insert_toc`,
+  `update_page` (which *overwrites* a page), `create_page`, `add_hashtag`/`remove_hashtag`,
   `export`, and `run_cleanup`. Enable them by setting `"AllowWrites": true` in the config. Gated
   tools return a clear "writes are disabled" error until you do.
 
@@ -293,7 +292,7 @@ There are two ways to change a page, with deliberately different safety models:
 > [#2324][2324]). This server reads page/hierarchy content via the CLI's `--output <file>` option to
 > avoid stdout/console-encoding corruption of non-ASCII content, writes page XML with its `omHash`
 > attributes intact, and uses bare-switch booleans — all as of 7.3.0. On 7.2.0 or earlier the read
-> commands fail. Content-writes (`append_to_page`, `update_page`, hashtags, `insert_toc`,
+> commands fail. Content-writes (`append_to_page`, `update_page`, hashtags,
 > `run_cleanup`) are **verified working on 7.3.0** (append round-trips and persists).
 >
 > [2322]: https://github.com/stevencohn/OneMore/issues/2322
@@ -378,7 +377,6 @@ The server is a **process orchestrator**: each tool builds a `OneMoreCli.exe` in
 | `create_page` | `GetHierarchy` → `PutPage --notebook --section --page --infile` (no `--force`) → `GetHierarchy` → `Goto --pageId` → `GetPage --current` → `PutPage --infile` (no `--page`, targets the embedded ID) |
 | `update_page` | `GetPage` (existence check) → `PutPage --notebook --section --page --infile <temp> --force` → `Sync` (if `SyncAfterWrite`) → `GetPage` (verify) |
 | `add_hashtag` / `remove_hashtag` | `AddHashtag --tags` / `RemoveHashtag --tags` |
-| `insert_toc` | `InsertToc [--page] [--refresh]` |
 | `export` | `Export --outpath --format [--pageId] [--backup]` |
 | `archive` | `Archive --notebook --outfile [--section]` |
 | `goto` | `Goto --pageId [--objectId]` |

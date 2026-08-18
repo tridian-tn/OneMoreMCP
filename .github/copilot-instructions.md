@@ -30,7 +30,7 @@ against `OneMoreCli.exe` directly; **guard them, and flag any change that reintr
   Emit `--force` (via `OneMoreCommand.Switch`, which adds `--flag` only when true), never `--force yes`.
   (7.2.0 briefly required `--flag yes`; that's gone.)
 - **Supply every REQUIRED parameter.** `GetPage`/`PutPage` need `--notebook` + `--section` + `--page`
-  (unless `--current`); `Search`/`AddHashtag`/`RemoveHashtag`/`InsertToc`, `Archive`, and **every
+  (unless `--current`); `Search`/`AddHashtag`/`RemoveHashtag`, `Archive`, and **every
   `run_cleanup` verb** (ApplyStyles/RemoveEmpty/Trim/Embed/…) need `--notebook`. A missing required
   parameter makes the CLI drop into an **interactive prompt that re-prompts forever** with no console,
   emitting unbounded output. `OneMoreCliRunner` guards this (closes child stdin, caps captured output,
@@ -46,7 +46,7 @@ against `OneMoreCli.exe` directly; **guard them, and flag any change that reintr
 - **Append is ungated; everything else that writes is gated.** `append_to_page` is append-only — it
   fetches the page locally, adds text, and writes back, never exposing existing content and never
   overwriting — so it is exempt from `AllowWrites`. All other content-changing tools
-  (`update_page`, hashtags, `insert_toc`, `run_cleanup`, `export`) must call
+  (`update_page`, `create_page`, hashtags, `run_cleanup`, `export`) must call
   `EnsureWritesAllowed()`. Keep that distinction.
 - **Known upstream limitation:** OneMore content-writes (`UpdatePageContent`) currently don't persist —
   tracked as stevencohn/OneMore#2322. Don't attempt to "fix" this in the wrapper; it's external. The

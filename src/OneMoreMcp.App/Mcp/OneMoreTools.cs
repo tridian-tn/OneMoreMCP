@@ -233,20 +233,6 @@ public sealed class OneMoreTools
         return "Hashtag(s) removed.";
     }
 
-    [McpServerTool(Name = "insert_toc")]
-    [Description("Insert (or refresh) a table of contents on a page. Requires notebook + section + page, and writes to be enabled.")]
-    public async Task<string> InsertToc(
-        [Description("Notebook name.")] string notebook,
-        [Description("Section name ('/'-delimited).")] string section,
-        [Description("Page name to insert the TOC on.")] string page,
-        [Description("Refresh an existing TOC instead of inserting a new one.")] bool refresh = false,
-        CancellationToken cancellationToken = default)
-    {
-        EnsureWritesAllowed();
-        await RunChecked(OneMoreCommand.InsertToc(notebook, section, page, refresh), cancellationToken);
-        return refresh ? "Table of contents refreshed." : "Table of contents inserted.";
-    }
-
     [McpServerTool(Name = "export")]
     [Description("Export pages to a folder in a chosen format (HTML, PDF, Word, XML, Markdown, or OneNote). Writes to disk. Requires writes to be enabled.")]
     public async Task<string> Export(

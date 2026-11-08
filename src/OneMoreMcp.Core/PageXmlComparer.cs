@@ -24,8 +24,8 @@ public static class PageXmlComparer
 
     /// <summary>
     /// Checks whether two page documents hold the same content, ignoring volatile attributes and how the
-    /// XML happens to be written: formatting whitespace, CDATA versus plain text, and namespace prefixes.
-    /// Text that can't be parsed only matches an identical string.
+    /// XML happens to be written: formatting whitespace, CDATA versus plain text, namespace prefixes,
+    /// attribute order, and comments. Text that can't be parsed only matches an identical string.
     /// </summary>
     /// <param name="first">One copy of the page XML</param>
     /// <param name="second">The copy to compare it with</param>
@@ -41,24 +41,33 @@ public static class PageXmlComparer
 
     /// <summary>Parses page XML and reduces it to what can differ between copies of different content.</summary>
     /// <param name="xml">The page XML</param>
-    /// <returns>The reduced document, or null if the text isn't XML</returns>
-    private static XDocument? ParseContent(string xml)
+    /// <returns>The reduced root element, or null if the text isn't XML</returns>
+    private static XElement? ParseContent(string xml)
     {
-        // Default parsing is deliberate: OneMore's PutPage reads the XML the same way, so whitespace-only
-        // plain text counts as empty here because empty is what gets written. Keeping it would make a
-        // space sent into an empty run look like a requested change that never landed.
-        XDocument doc;
-        try { doc = XDocument.Parse(xml); }
+        // This parses the way OneMore's PutPage does, deliberately, so it sees what would be written. Anything
+        // outside the root is dropped, and whitespace-only plain text counts as empty. Keeping that whitespace
+        // would make a space sent into an empty run look like a requested change that never landed.
+        XElement root;
+        try { root = XElement.Parse(xml); }
         catch (XmlException) { return null; }
 
+        // OneNote ignores these inside the page too. A comment in a run's HTML is CDATA, so it isn't touched.
+        root.DescendantNodes().Where(n => n is XComment or XProcessingInstruction).Remove();
+
         // Dropping namespace declarations only loses the prefixes, since every name keeps its namespace.
-        doc.Descendants().Attributes()
+        root.DescendantsAndSelf().Attributes()
             .Where(a => a.IsNamespaceDeclaration || VolatileAttributes.Contains(a.Name.LocalName))
             .Remove();
 
-        // XNode.DeepEquals treats CDATA and plain text holding the same characters as different.
-        foreach (var cdata in doc.DescendantNodes().OfType<XCData>().ToList()) cdata.ReplaceWith(new XText(cdata.Value));
+        // XNode.DeepEquals is sensitive to attribute order, which means nothing in XML.
+        foreach (var element in root.DescendantsAndSelf())
+        {
+            element.ReplaceAttributes(element.Attributes().OrderBy(a => a.Name.ToString(), StringComparer.Ordinal).ToList());
+        }
 
-        return doc;
+        // It also treats CDATA and plain text holding the same characters as different.
+        foreach (var cdata in root.DescendantNodes().OfType<XCData>().ToList()) cdata.ReplaceWith(new XText(cdata.Value));
+
+        return root;
     }
 }

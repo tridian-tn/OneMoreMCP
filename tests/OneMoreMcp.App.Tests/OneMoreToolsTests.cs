@@ -448,6 +448,34 @@ public class OneMoreToolsTests
         Assert.Equal("Page updated.", result);
     }
 
+    [Theory]
+    [InlineData("<one:Page ", "<!-- note --><one:Page ")] // OneMore drops a comment outside the root
+    [InlineData("<one:Title", "<!-- note --><one:Title")] // OneNote ignores one inside it
+    public async Task Update_page_accepts_unchanged_content_sent_with_a_comment(string find, string replacement)
+    {
+        var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
+        runner.InitialPageXml = PageModifiedAt("2026-11-08T15:31:36.000Z");
+        runner.ReadBackAfterWrite = PageModifiedAt("2026-11-08T15:32:10.000Z");
+
+        var result = await tools.UpdatePage(SamplePageXml.Replace(find, replacement), notebook: "N", section: "S", page: "P");
+
+        Assert.Equal("Page updated.", result);
+    }
+
+    [Fact]
+    public async Task Update_page_accepts_unchanged_content_with_its_attributes_in_another_order()
+    {
+        var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
+        var page = SamplePageXml.Replace("ID=\"{P1}\"", "ID=\"{P1}\" name=\"P\"");
+        runner.InitialPageXml = page;
+        runner.ReadBackAfterWrite = page;
+
+        var result = await tools.UpdatePage(
+            SamplePageXml.Replace("ID=\"{P1}\"", "name=\"P\" ID=\"{P1}\""), notebook: "N", section: "S", page: "P");
+
+        Assert.Equal("Page updated.", result);
+    }
+
     [Fact]
     public async Task Update_page_accepts_a_plain_text_space_sent_into_an_empty_run()
     {

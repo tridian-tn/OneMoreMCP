@@ -49,6 +49,7 @@ public class PageXmlComparerTests
     [InlineData("quickStyleIndex=\"1\"", "quickStyleIndex=\"2\"")]
     [InlineData("name=\"P\"", "name=\"Q\"")]
     [InlineData("Existing line", "Existing line ")] // whitespace inside a text run is content
+    [InlineData("Existing line", "<!-- note -->")] // and so is a comment in the run's HTML
     public void Real_changes_are_seen(string find, string replacement)
     {
         Assert.False(PageXmlComparer.HasSameContent(SamplePage, Edited(find, replacement)));
@@ -74,6 +75,24 @@ public class PageXmlComparerTests
     {
         var empty = Edited("<![CDATA[Existing line]]>", "<![CDATA[]]>");
         Assert.True(PageXmlComparer.HasSameContent(empty, empty.Replace("<![CDATA[]]>", "")));
+    }
+
+    [Theory]
+    [InlineData("<one:Page ", "<!-- note --><one:Page ")]
+    [InlineData("<one:Title", "<!-- note --><one:Title")]
+    [InlineData("</one:Page>", "</one:Page><!-- note -->")]
+    [InlineData("<one:Page ", "<?note?><one:Page ")]
+    [InlineData("<one:Title", "<?note?><one:Title")]
+    [InlineData("<one:Page ", "<!DOCTYPE note><one:Page ")]
+    public void Nodes_that_never_reach_the_page_are_ignored(string find, string replacement)
+    {
+        Assert.True(PageXmlComparer.HasSameContent(SamplePage, Edited(find, replacement)));
+    }
+
+    [Fact]
+    public void Attribute_order_is_ignored()
+    {
+        Assert.True(PageXmlComparer.HasSameContent(SamplePage, Edited("ID=\"{P1}\" name=\"P\"", "name=\"P\" ID=\"{P1}\"")));
     }
 
     [Fact]

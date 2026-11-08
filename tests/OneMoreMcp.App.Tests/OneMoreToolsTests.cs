@@ -497,6 +497,39 @@ public class OneMoreToolsTests
     }
 
     [Fact]
+    public async Task Search_titles_local_match_skips_a_section_the_runner_times_out_on()
+    {
+        // The real runner reports a timeout or output overflow as its own CliException, not McpException.
+        var (tools, runner) = BuildWithBrokenSearchTitles(SectionWithPages("Roadmap Q3"));
+        var sections = runner.HierarchyFor!;
+        runner.HierarchyFor = argv => Section(argv) == "Ideas"
+            ? throw new CliException("OneMore CLI call timed out after 150s.", "GetHierarchy")
+            : sections(argv);
+
+        var md = await tools.SearchTitles("roadmap", notebook: "Work");
+
+        Assert.Contains("- Work/Archive/2025/Old roadmap", md);
+        Assert.Contains("1 section(s) couldn't be read", md);
+    }
+
+    [Fact]
+    public async Task Search_titles_local_match_stops_when_the_caller_cancels()
+    {
+        using var cts = new CancellationTokenSource();
+        var (tools, runner) = BuildWithBrokenSearchTitles(SectionWithPages("Roadmap Q3"));
+        var sections = runner.HierarchyFor!;
+        runner.HierarchyFor = argv =>
+        {
+            if (Section(argv) != "Ideas") return sections(argv);
+            cts.Cancel(); // how the real runner reports a cancelled call
+            throw new CliException("OneMore CLI call was cancelled.", "GetHierarchy");
+        };
+
+        await Assert.ThrowsAsync<CliException>(() => tools.SearchTitles("roadmap", notebook: "Work", cancellationToken: cts.Token));
+        Assert.DoesNotContain(runner.Commands, c => Section(c.Build()) == "Archive/2025");
+    }
+
+    [Fact]
     public async Task Search_titles_local_match_reports_an_unknown_notebook()
     {
         var (tools, runner) = Build();

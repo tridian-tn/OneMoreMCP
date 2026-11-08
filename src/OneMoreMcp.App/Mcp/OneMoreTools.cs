@@ -388,7 +388,9 @@ public sealed class OneMoreTools
             {
                 sectionXml = await ReadContent(OneMoreCommand.GetHierarchy(section.Notebook, section.Path), cancellationToken);
             }
-            catch (McpException ex)
+            // A non-zero exit arrives as McpException; a timeout or output overflow as the runner's own
+            // CliException. Either way skip the section, unless the caller cancelled, which has to stop it.
+            catch (Exception ex) when ((ex is McpException or CliException) && !cancellationToken.IsCancellationRequested)
             {
                 _log.LogWarning("Skipped section '{Notebook}/{Section}' in a local title search: {Error}",
                     section.Notebook, section.Path, ex.Message);

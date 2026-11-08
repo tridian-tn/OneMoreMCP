@@ -44,6 +44,9 @@ public static class PageXmlComparer
     /// <returns>The reduced document, or null if the text isn't XML</returns>
     private static XDocument? ParseContent(string xml)
     {
+        // Default parsing is deliberate: OneMore's PutPage reads the XML the same way, so whitespace-only
+        // plain text counts as empty here because empty is what gets written. Keeping it would make a
+        // space sent into an empty run look like a requested change that never landed.
         XDocument doc;
         try { doc = XDocument.Parse(xml); }
         catch (XmlException) { return null; }

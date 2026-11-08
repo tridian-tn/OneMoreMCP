@@ -77,6 +77,22 @@ public class PageXmlComparerTests
     }
 
     [Fact]
+    public void A_whitespace_only_plain_text_run_matches_an_empty_run()
+    {
+        // OneMore parses the XML it's given with the same defaults and drops this space, so it writes an empty run.
+        var empty = Edited("<![CDATA[Existing line]]>", "");
+        Assert.True(PageXmlComparer.HasSameContent(empty, Edited("<![CDATA[Existing line]]>", " ")));
+    }
+
+    [Fact]
+    public void A_whitespace_only_plain_text_run_differs_from_a_cdata_space()
+    {
+        // OneNote keeps a space held in CDATA, and writing it back as plain text really does remove it.
+        var cdataSpace = Edited("<![CDATA[Existing line]]>", "<![CDATA[ ]]>");
+        Assert.False(PageXmlComparer.HasSameContent(cdataSpace, Edited("<![CDATA[Existing line]]>", " ")));
+    }
+
+    [Fact]
     public void Text_is_compared_after_decoding()
     {
         // In CDATA "&lt;" is four literal characters; as plain text it's one "<".

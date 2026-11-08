@@ -447,6 +447,21 @@ public class OneMoreToolsTests
     }
 
     [Fact]
+    public async Task Update_page_accepts_a_plain_text_space_sent_into_an_empty_run()
+    {
+        // OneMore drops whitespace-only plain text as it parses the XML, so the page stays as it was and
+        // nothing was lost. Real pages have plenty of empty runs: OneNote uses one to mark the caret.
+        var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
+        runner.InitialPageXml = PageModifiedAt("2026-11-08T15:31:36.000Z").Replace("<![CDATA[Existing]]>", "<![CDATA[]]>");
+        runner.ReadBackAfterWrite = PageModifiedAt("2026-11-08T15:32:10.000Z").Replace("<![CDATA[Existing]]>", "<![CDATA[]]>");
+
+        var result = await tools.UpdatePage(
+            SamplePageXml.Replace("<![CDATA[Existing]]>", " "), notebook: "N", section: "S", page: "P");
+
+        Assert.Equal("Page updated.", result);
+    }
+
+    [Fact]
     public async Task Update_page_surfaces_a_read_failure_rather_than_calling_it_a_missing_page()
     {
         // A CLI fault while checking the target must not be relabelled "create the page first".

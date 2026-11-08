@@ -462,6 +462,21 @@ public class OneMoreToolsTests
         Assert.Equal("Page updated.", result);
     }
 
+    [Theory]
+    [InlineData("ID=\"{P1}\"", "ID=\"{Q1}\"")]
+    [InlineData(" ID=\"{P1}\"", "")]
+    public async Task Update_page_accepts_unchanged_content_sent_with_another_root_id(string find, string replacement)
+    {
+        // PutPage replaces the root's ID with the ID of the page it's writing to, so this changes nothing.
+        var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
+        runner.InitialPageXml = PageModifiedAt("2026-11-08T15:31:36.000Z");
+        runner.ReadBackAfterWrite = PageModifiedAt("2026-11-08T15:32:10.000Z");
+
+        var result = await tools.UpdatePage(SamplePageXml.Replace(find, replacement), notebook: "N", section: "S", page: "P");
+
+        Assert.Equal("Page updated.", result);
+    }
+
     [Fact]
     public async Task Update_page_accepts_unchanged_content_with_its_attributes_in_another_order()
     {

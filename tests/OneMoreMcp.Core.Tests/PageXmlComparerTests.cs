@@ -50,6 +50,7 @@ public class PageXmlComparerTests
     [InlineData("name=\"P\"", "name=\"Q\"")]
     [InlineData("Existing line", "Existing line ")] // whitespace inside a text run is content
     [InlineData("Existing line", "<!-- note -->")] // and so is a comment in the run's HTML
+    [InlineData("<one:Outline ", "<one:Outline ID=\"{X}\" ")] // only the root's ID is ignored
     public void Real_changes_are_seen(string find, string replacement)
     {
         Assert.False(PageXmlComparer.HasSameContent(SamplePage, Edited(find, replacement)));
@@ -86,6 +87,15 @@ public class PageXmlComparerTests
     [InlineData("<one:Page ", "<!DOCTYPE note><one:Page ")]
     public void Nodes_that_never_reach_the_page_are_ignored(string find, string replacement)
     {
+        Assert.True(PageXmlComparer.HasSameContent(SamplePage, Edited(find, replacement)));
+    }
+
+    [Theory]
+    [InlineData("ID=\"{P1}\"", "ID=\"{Q1}\"")]
+    [InlineData(" ID=\"{P1}\"", "")]
+    public void The_root_id_is_ignored(string find, string replacement)
+    {
+        // PutPage replaces it with the ID of the page it's writing to, so it never reaches the page as sent.
         Assert.True(PageXmlComparer.HasSameContent(SamplePage, Edited(find, replacement)));
     }
 

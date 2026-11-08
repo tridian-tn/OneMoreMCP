@@ -23,9 +23,9 @@ public static class PageXmlComparer
     };
 
     /// <summary>
-    /// Checks whether two page documents hold the same content, ignoring volatile attributes and how the
-    /// XML happens to be written: formatting whitespace, CDATA versus plain text, namespace prefixes,
-    /// attribute order, and comments. Text that can't be parsed only matches an identical string.
+    /// Checks whether two page documents hold the same content, ignoring volatile attributes, the root's
+    /// ID, and how the XML happens to be written: formatting whitespace, CDATA versus plain text, namespace
+    /// prefixes, attribute order, and comments. Text that can't be parsed only matches an identical string.
     /// </summary>
     /// <param name="first">One copy of the page XML</param>
     /// <param name="second">The copy to compare it with</param>
@@ -50,6 +50,9 @@ public static class PageXmlComparer
         XElement root;
         try { root = XElement.Parse(xml); }
         catch (XmlException) { return null; }
+
+        // PutPage replaces the root's ID with the ID of the page it's writing to, so it isn't content.
+        root.Attribute("ID")?.Remove();
 
         // OneNote ignores these inside the page too. A comment in a run's HTML is CDATA, so it isn't touched.
         root.DescendantNodes().Where(n => n is XComment or XProcessingInstruction).Remove();

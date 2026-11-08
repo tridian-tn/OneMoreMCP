@@ -79,12 +79,14 @@ public class PageAppenderTests
     }
 
     [Fact]
-    public void Append_to_a_page_without_an_outline_creates_one()
+    public void Append_to_a_page_without_an_outline_is_refused()
     {
-        var result = PageAppender.Append(PageNoOutline, "first content", AppendFormat.Plain);
-        var doc = XDocument.Parse(result);
-        Assert.Single(doc.Descendants(One + "Outline"));
-        Assert.Contains("first content", Runs(result));
+        // OneNote ignores a new top-level outline, so building one would only produce a write it discards.
+        var ex = Assert.Throws<ArgumentException>(
+            () => PageAppender.Append(PageNoOutline, "first content", AppendFormat.Plain));
+
+        Assert.Contains("no outline", ex.Message);
+        Assert.DoesNotContain("Parameter", ex.Message); // this message reaches the client as-is
     }
 
     [Fact]

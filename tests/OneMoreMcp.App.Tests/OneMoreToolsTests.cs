@@ -22,9 +22,8 @@ public class OneMoreToolsTests
         "<one:OE><one:T><![CDATA[Existing]]></one:T></one:OE>" +
         "</one:OEChildren></one:Outline></one:Page>";
 
-    // Distinct from SamplePageXml (the fake's default "current page" content) so write tests that need a
-    // real before/after difference — for the silent-no-op read-back check — don't false-positive on writing
-    // content that's byte-identical to what's already "on the page".
+    // Distinct from SamplePageXml (the fake's default "current page" content) so a write has something to
+    // change, which is what gives the silent-no-op read-back check something to detect.
     private const string SampleUpdatedPageXml =
         "<?xml version=\"1.0\"?>" +
         "<one:Page xmlns:one=\"http://schemas.microsoft.com/office/onenote/2013/onenote\" ID=\"{P1}\">" +
@@ -32,6 +31,16 @@ public class OneMoreToolsTests
         "<one:Outline><one:OEChildren>" +
         "<one:OE><one:T><![CDATA[Updated]]></one:T></one:OE>" +
         "</one:OEChildren></one:Outline></one:Page>";
+
+    // A page with a title and no body, like one fresh from create_page.
+    private const string TitleOnlyPageXml =
+        "<?xml version=\"1.0\"?>" +
+        "<one:Page xmlns:one=\"http://schemas.microsoft.com/office/onenote/2013/onenote\" ID=\"{P1}\">" +
+        "<one:Title><one:OE><one:T><![CDATA[Title]]></one:T></one:OE></one:Title></one:Page>";
+
+    /// <summary>The sample page as OneNote reports it, stamped with the given modified time.</summary>
+    private static string PageModifiedAt(string lastModifiedTime) =>
+        SamplePageXml.Replace("ID=\"{P1}\"", $"ID=\"{{P1}}\" lastModifiedTime=\"{lastModifiedTime}\"");
 
     private static (OneMoreTools tools, FakeRunner runner) Build(
         bool allowWrites = false, string? exportRoot = null, bool syncAfterWrite = true)
@@ -347,6 +356,7 @@ public class OneMoreToolsTests
         var ex = await Assert.ThrowsAsync<McpException>(
             () => tools.AppendToPage("note", notebook: "N", section: "S", page: "P", format: "plain"));
         Assert.Contains("unchanged", ex.Message);
+        Assert.Contains("dialog open in OneNote", ex.Message); // the CLI's own output never shows this cause
     }
 
     [Fact]
@@ -358,6 +368,142 @@ public class OneMoreToolsTests
         var ex = await Assert.ThrowsAsync<McpException>(
             () => tools.UpdatePage(SampleUpdatedPageXml, notebook: "N", section: "S", page: "P"));
         Assert.Contains("unchanged", ex.Message);
+    }
+
+    [Fact]
+    public async Task Append_to_page_throws_when_the_read_back_differs_only_in_lastModifiedTime()
+    {
+        // OneNote moves lastModifiedTime even for a write it discards, so the page has to be judged on
+        // its content: a moved timestamp alone isn't a write that took effect.
+        var (tools, runner) = Build(syncAfterWrite: false);
+        runner.InitialPageXml = PageModifiedAt("2026-11-08T15:31:36.000Z");
+        runner.ReadBackAfterWrite = PageModifiedAt("2026-11-08T15:32:10.000Z");
+
+        var ex = await Assert.ThrowsAsync<McpException>(
+            () => tools.AppendToPage("note", notebook: "N", section: "S", page: "P", format: "plain"));
+        Assert.Contains("unchanged", ex.Message);
+    }
+
+    [Fact]
+    public async Task Update_page_throws_when_the_read_back_differs_only_in_lastModifiedTime()
+    {
+        var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
+        runner.InitialPageXml = PageModifiedAt("2026-11-08T15:31:36.000Z");
+        runner.ReadBackAfterWrite = PageModifiedAt("2026-11-08T15:32:10.000Z");
+
+        var ex = await Assert.ThrowsAsync<McpException>(
+            () => tools.UpdatePage(SampleUpdatedPageXml, notebook: "N", section: "S", page: "P"));
+        Assert.Contains("unchanged", ex.Message);
+    }
+
+    [Fact]
+    public async Task Append_to_page_succeeds_when_the_content_changes_along_with_lastModifiedTime()
+    {
+        var (tools, runner) = Build(syncAfterWrite: false);
+        runner.InitialPageXml = PageModifiedAt("2026-11-08T15:31:36.000Z");
+        runner.ReadBackAfterWrite = SampleUpdatedPageXml.Replace(
+            "ID=\"{P1}\"", "ID=\"{P1}\" lastModifiedTime=\"2026-11-08T15:32:10.000Z\"");
+
+        Assert.Equal("Appended.", await tools.AppendToPage("note", notebook: "N", section: "S", page: "P", format: "plain"));
+    }
+
+    [Fact]
+    public async Task Update_page_accepts_a_write_of_what_is_already_on_the_page()
+    {
+        // Nothing was asked to change, so an unchanged page isn't a failed write or a sync conflict.
+        var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
+        runner.InitialPageXml = PageModifiedAt("2026-11-08T15:31:36.000Z");
+        runner.ReadBackAfterWrite = PageModifiedAt("2026-11-08T15:32:10.000Z");
+
+        var result = await tools.UpdatePage(
+            PageModifiedAt("2026-11-08T15:31:36.000Z"), notebook: "N", section: "S", page: "P");
+
+        Assert.Equal("Page updated.", result);
+    }
+
+    [Fact]
+    public async Task Update_page_accepts_unchanged_content_sent_as_plain_text()
+    {
+        var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
+        runner.InitialPageXml = PageModifiedAt("2026-11-08T15:31:36.000Z");
+        runner.ReadBackAfterWrite = PageModifiedAt("2026-11-08T15:32:10.000Z");
+
+        var result = await tools.UpdatePage(
+            SamplePageXml.Replace("<![CDATA[Existing]]>", "Existing"), notebook: "N", section: "S", page: "P");
+
+        Assert.Equal("Page updated.", result);
+    }
+
+    [Fact]
+    public async Task Update_page_accepts_unchanged_content_sent_with_an_extra_namespace_declaration()
+    {
+        var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
+        runner.InitialPageXml = PageModifiedAt("2026-11-08T15:31:36.000Z");
+        runner.ReadBackAfterWrite = PageModifiedAt("2026-11-08T15:32:10.000Z");
+
+        var result = await tools.UpdatePage(
+            SamplePageXml.Replace("xmlns:one=", "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:one="),
+            notebook: "N", section: "S", page: "P");
+
+        Assert.Equal("Page updated.", result);
+    }
+
+    [Theory]
+    [InlineData("<one:Page ", "<!-- note --><one:Page ")] // OneMore drops a comment outside the root
+    [InlineData("<one:Title", "<!-- note --><one:Title")] // OneNote ignores one inside it
+    public async Task Update_page_accepts_unchanged_content_sent_with_a_comment(string find, string replacement)
+    {
+        var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
+        runner.InitialPageXml = PageModifiedAt("2026-11-08T15:31:36.000Z");
+        runner.ReadBackAfterWrite = PageModifiedAt("2026-11-08T15:32:10.000Z");
+
+        var result = await tools.UpdatePage(SamplePageXml.Replace(find, replacement), notebook: "N", section: "S", page: "P");
+
+        Assert.Equal("Page updated.", result);
+    }
+
+    [Theory]
+    [InlineData("ID=\"{P1}\"", "ID=\"{Q1}\"")]
+    [InlineData(" ID=\"{P1}\"", "")]
+    public async Task Update_page_accepts_unchanged_content_sent_with_another_root_id(string find, string replacement)
+    {
+        // PutPage replaces the root's ID with the ID of the page it's writing to, so this changes nothing.
+        var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
+        runner.InitialPageXml = PageModifiedAt("2026-11-08T15:31:36.000Z");
+        runner.ReadBackAfterWrite = PageModifiedAt("2026-11-08T15:32:10.000Z");
+
+        var result = await tools.UpdatePage(SamplePageXml.Replace(find, replacement), notebook: "N", section: "S", page: "P");
+
+        Assert.Equal("Page updated.", result);
+    }
+
+    [Fact]
+    public async Task Update_page_accepts_unchanged_content_with_its_attributes_in_another_order()
+    {
+        var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
+        var page = SamplePageXml.Replace("ID=\"{P1}\"", "ID=\"{P1}\" name=\"P\"");
+        runner.InitialPageXml = page;
+        runner.ReadBackAfterWrite = page;
+
+        var result = await tools.UpdatePage(
+            SamplePageXml.Replace("ID=\"{P1}\"", "name=\"P\" ID=\"{P1}\""), notebook: "N", section: "S", page: "P");
+
+        Assert.Equal("Page updated.", result);
+    }
+
+    [Fact]
+    public async Task Update_page_accepts_a_plain_text_space_sent_into_an_empty_run()
+    {
+        // OneMore drops whitespace-only plain text as it parses the XML, so the page stays as it was and
+        // nothing was lost. Real pages have plenty of empty runs: OneNote uses one to mark the caret.
+        var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
+        runner.InitialPageXml = PageModifiedAt("2026-11-08T15:31:36.000Z").Replace("<![CDATA[Existing]]>", "<![CDATA[]]>");
+        runner.ReadBackAfterWrite = PageModifiedAt("2026-11-08T15:32:10.000Z").Replace("<![CDATA[Existing]]>", "<![CDATA[]]>");
+
+        var result = await tools.UpdatePage(
+            SamplePageXml.Replace("<![CDATA[Existing]]>", " "), notebook: "N", section: "S", page: "P");
+
+        Assert.Equal("Page updated.", result);
     }
 
     [Fact]
@@ -400,6 +546,21 @@ public class OneMoreToolsTests
             () => tools.AppendToPage("note", notebook: "N", section: "S", page: "Nope", format: "plain"));
 
         Assert.DoesNotContain(runner.Commands, c => c.Name == "PutPage");
+    }
+
+    [Fact]
+    public async Task Append_to_page_refuses_a_page_with_no_outline_without_writing()
+    {
+        // OneNote ignores a new top-level outline, so the write could never land. Only the read may run.
+        var (tools, runner) = Build();
+        runner.InitialPageXml = TitleOnlyPageXml;
+
+        var ex = await Assert.ThrowsAsync<McpException>(
+            () => tools.AppendToPage("note", notebook: "N", section: "S", page: "P", format: "plain"));
+
+        Assert.Contains("no outline", ex.Message);
+        Assert.Contains("typing a line", ex.Message);
+        Assert.Equal(new[] { "GetPage" }, runner.Commands.Select(c => c.Name).ToArray());
     }
 
     [Fact]
@@ -798,6 +959,9 @@ public class OneMoreToolsTests
         /// <summary>Exit code the fake reports.</summary>
         public int ExitCode { get; set; } = 0;
 
+        /// <summary>What GetPage returns until a PutPage has landed.</summary>
+        public string InitialPageXml { get; set; } = SamplePageXml;
+
         /// <summary>Per-command result returned instead of running it, for simulating one command's failure.</summary>
         public Dictionary<string, CliResult> FailWith { get; } = new();
 
@@ -811,6 +975,10 @@ public class OneMoreToolsTests
         /// <summary>When true, PutPage exits clean but never updates <see cref="PersistedPageXml"/> — simulates
         /// the silent no-op write from issue #10 (e.g. a OneDrive sync reverting the change).</summary>
         public bool SimulateNoOpWrite { get; set; }
+
+        /// <summary>When set, PutPage exits clean but the page then reads back as this rather than what was
+        /// sent — how a page looks when OneNote discards a write and still moves its lastModifiedTime.</summary>
+        public string? ReadBackAfterWrite { get; set; }
 
         /// <summary>When true, GetPage returns nothing — how the real CLI reports a page that doesn't exist
         /// (exit 0, empty output file, no diagnostic on stdout).</summary>
@@ -853,7 +1021,7 @@ public class OneMoreToolsTests
             {
                 var infile = OptionValue(argv, "--infile");
                 if (infile != null) LastInfileXml = File.ReadAllText(infile);
-                if (!SimulateNoOpWrite) PersistedPageXml = LastInfileXml;
+                if (!SimulateNoOpWrite) PersistedPageXml = ReadBackAfterWrite ?? LastInfileXml;
 
                 var named = OptionValue(argv, "--page") != null;
                 var forced = argv.Contains("--force");
@@ -876,7 +1044,7 @@ public class OneMoreToolsTests
 
             var payload = Content.TryGetValue(command.Name, out var c) ? c
                 : command.Name == "GetPage" && argv.Contains("--current") && CurrentPageXml != null ? CurrentPageXml
-                : command.Name == "GetPage" ? (PageMissing ? "" : PersistedPageXml ?? SamplePageXml)
+                : command.Name == "GetPage" ? (PageMissing ? "" : PersistedPageXml ?? InitialPageXml)
                 : command.Name == "GetHierarchy" ? HierarchyFor?.Invoke(argv) ?? SectionXml()
                 : "";
 

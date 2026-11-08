@@ -262,8 +262,11 @@ pruned. `InsertToc` — an unrelated command that builds content — is equally 
 that already exists works fine, which is why `append_to_page` and `update_page` are reliable.
 
 So a page created here stays empty until someone types in it in OneNote; after that, the normal write
-tools work on it. Because the CLI has no delete command, failed attempts leave junk "Untitled" pages
-behind, so `update_page` checks its target exists before writing rather than producing one.
+tools work on it. `append_to_page` refuses a page with no outline up front rather than sending a write
+OneNote would discard. Typing a line in OneNote gives the page an outline, and OneMore's `AddHashtag`
+also creates one (a tag bank). Because the CLI has no delete command, failed attempts leave junk
+"Untitled" pages behind, so `update_page` checks its target exists before writing rather than producing
+one.
 
 Two faults in OneMore's own source explain the silence
 ([`PutPageCommand.cs`](https://github.com/stevencohn/OneMore/blob/main/OneMore/Cli/Commands/PutPageCommand.cs)):
@@ -273,6 +276,14 @@ Two faults in OneMore's own source explain the silence
 - `Page.OptimizeForSave` drops any child element whose `omHash` still matches its content — a
   deliberate "unchanged, skip" optimisation which also means **re-sending a stale copy of a page
   silently does nothing**. Always write back XML you've just read.
+
+So the write tools read the page back and compare it with what was there before. They compare content
+rather than raw XML, because OneNote moves `lastModifiedTime` even for a write it discards. That
+attribute, `selected`, `isCurrentlyViewed` and `omHash` (a hash that covers the others) are all ignored.
+
+A dialog open in OneNote blocks writes the same silent way, even one as harmless as About. The CLI logs
+`80042030` to `%TEMP%\OneMore.log`, retries, gives up, and still exits 0 with no output, so the read-back
+failure is the only sign of it in a tool result.
 
 ## Title search falls back to a local match
 
@@ -397,7 +408,7 @@ The server is a **process orchestrator**: each tool builds a `OneMoreCli.exe` in
 | `search_titles` | `SearchTitles --query [--notebook]` (page paths); on the add-in's `Unknown command` error, `GetHierarchy` → `GetHierarchy --notebook --section` per section, matched locally |
 | `search_hashtags` | `SearchHashtags --query [--allTags] [--notebook] [--section] [--page]` |
 | `sync` | `Sync --notebook` |
-| `append_to_page` | `GetPage` (raw) → local append → `PutPage --infile <temp> --force` → `Sync` (if `SyncAfterWrite`) |
+| `append_to_page` | `GetPage` (raw) → local append → `PutPage --infile <temp> --force` → `Sync` (if `SyncAfterWrite`) → `GetPage` (verify) |
 | `create_page` | `GetHierarchy` → `PutPage --notebook --section --page --infile` (no `--force`) → `GetHierarchy` → `Goto --pageId` → `GetPage --current` → `PutPage --infile` (no `--page`, targets the embedded ID) |
 | `update_page` | `GetPage` (existence check) → `PutPage --notebook --section --page --infile <temp> --force` → `Sync` (if `SyncAfterWrite`) → `GetPage` (verify) |
 | `add_hashtag` / `remove_hashtag` | `AddHashtag --tags` / `RemoveHashtag --tags` |

@@ -21,17 +21,22 @@ public enum AppendFormat
 
 /// <summary>
 /// Appends text to a OneNote page by editing the page's XML: it inserts new <c>one:OE</c> paragraphs
-/// into the last outline's <c>one:OEChildren</c> (creating an outline if the page has none) and leaves
-/// everything else untouched. This is the engine behind the ungated <c>append_to_page</c> tool — the
-/// page's existing content is fetched, mutated locally, and written back, so it never becomes LLM
-/// tokens and can never be overwritten, only added to.
+/// into the last outline's <c>one:OEChildren</c> and leaves everything else untouched. This is the
+/// engine behind the ungated <c>append_to_page</c> tool — the page's existing content is fetched,
+/// mutated locally, and written back, so it never becomes LLM tokens and can never be overwritten,
+/// only added to.
 /// </summary>
 public static partial class PageAppender
 {
+    private const string NoOutlineMessage =
+        "This page has no outline to append to, and OneNote won't accept new body content on a page like " +
+        "that, so nothing was written. The page needs some body text first: typing a line in it in OneNote " +
+        "works, and OneMore's AddHashtag also creates a tag-bank outline.";
+
     /// <summary>
     /// Returns <paramref name="pageXml"/> with <paramref name="text"/> appended as one or more
-    /// paragraphs. The input must be a <c>one:Page</c> document (as GetPage emits). Existing outlines
-    /// and their content are preserved; only new <c>one:OE</c> nodes are added.
+    /// paragraphs. The input must be a <c>one:Page</c> document (as GetPage emits) with at least one
+    /// outline. Existing outlines and their content are preserved; only new <c>one:OE</c> nodes are added.
     /// </summary>
     public static string Append(string pageXml, string text, AppendFormat format)
     {
@@ -59,17 +64,17 @@ public static partial class PageAppender
     }
 
     /// <summary>
-    /// Finds (or creates) the <c>one:OEChildren</c> to append into: the last outline's last child
-    /// container. A page with no outline gets a fresh outline + container added at the end.
+    /// Finds the <c>one:OEChildren</c> to append into: the last outline's last child container, created
+    /// if that outline has none. A page with no outline is refused rather than given one, because OneNote
+    /// ignores a new top-level outline: it takes the write, moves the page's <c>lastModifiedTime</c>, and
+    /// discards the content.
     /// </summary>
     private static XElement AppendTarget(XElement page)
     {
         var outline = page.Elements(OneNoteSchema.Outline).LastOrDefault();
-        if (outline is null)
-        {
-            outline = new XElement(OneNoteSchema.Outline, new XElement(OneNoteSchema.OEChildren));
-            page.Add(outline);
-        }
+
+        // No paramName: ArgumentException would add it to the message, and this one reaches the client.
+        if (outline is null) throw new ArgumentException(NoOutlineMessage);
 
         var children = outline.Elements(OneNoteSchema.OEChildren).LastOrDefault();
         if (children is null)

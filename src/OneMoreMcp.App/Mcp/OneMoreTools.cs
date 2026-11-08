@@ -134,7 +134,8 @@ public sealed class OneMoreTools
     [McpServerTool(Name = "append_to_page")]
     [Description("Append text to the end of a OneNote page WITHOUT sending the page's existing content to the model. "
         + "The server fetches the page locally, adds your text as new paragraph(s), and writes it back — it can only add, "
-        + "never overwrite. Always available (independent of the write gate). Requires notebook + section + page.")]
+        + "never overwrite. Always available (independent of the write gate). Requires notebook + section + page. "
+        + "Refuses a page with no body yet (title only), since OneNote won't accept new body content on one.")]
     public async Task<string> AppendToPage(
         [Description("The text to append. One paragraph per line.")] string text,
         [Description("Notebook name.")] string notebook,
@@ -150,7 +151,8 @@ public sealed class OneMoreTools
         // "before" snapshot PutPageXml uses to verify the write actually took effect.
         var pageXml = await ReadPageXml(notebook, section, page, current: false, cancellationToken);
 
-        // 2. Insert the new text, preserving everything else. PageAppender lives in the pure Core
+        // 2. Insert the new text, preserving everything else. This refuses a page with no outline before
+        // anything's written, since OneNote would discard the content. PageAppender lives in the pure Core
         // project and throws plain ArgumentException; translate to McpException so the message
         // reaches the client instead of being replaced with a generic one.
         string updated;
@@ -554,9 +556,11 @@ public sealed class OneMoreTools
     /// verifies the write actually took effect. A clean PutPage exit isn't proof of that — the CLI can
     /// retry past a transient COM error and still exit 0, and on a OneDrive-synced notebook the follow-up
     /// Sync can resolve a conflict in favour of the server copy, silently reverting the local change. The
-    /// page is read back afterwards and compared against a "before" snapshot: a mismatch confirms the
-    /// write; an exact match means it silently no-opped. The target must already exist: PutPage's create
-    /// path is broken and leaves an empty "Untitled" page rather than applying the content.
+    /// page is read back afterwards and its content compared against a "before" snapshot, ignoring
+    /// attributes that move on their own (OneNote bumps <c>lastModifiedTime</c> even for a write it
+    /// discards): a difference confirms the write; no difference means it silently no-opped, unless the
+    /// XML sent was already what's on the page. The target must already exist: PutPage's create path is
+    /// broken and leaves an empty "Untitled" page rather than applying the content.
     /// </summary>
     /// <param name="previousXml">
     /// The page's content before this write, if the caller already fetched it (e.g. append_to_page).
@@ -623,11 +627,19 @@ public sealed class OneMoreTools
                     _log.LogWarning(ex, "Could not read back '{Page}' to verify the write took effect.", page);
                 }
 
-                if (afterXml is not null && afterXml == previousXml)
+                // An unchanged page only means a lost write if the write asked for a change. Re-sending
+                // what's already there leaves nothing to detect.
+                if (afterXml is not null
+                    && !PageXmlComparer.HasSameContent(pageXml, previousXml)
+                    && PageXmlComparer.HasSameContent(afterXml, previousXml))
+                {
                     throw new McpException(
                         $"PutPage reported success for '{notebook}/{section}/{page}', but the page is unchanged after " +
-                        "writing — the write did not take effect. A OneDrive sync conflict reverting the change " +
-                        "afterwards is a likely cause; check the notebook's sync status and retry.");
+                        "writing — the write did not take effect. Likely causes: a dialog open in OneNote, which blocks " +
+                        "writes (close it and retry); a OneDrive sync conflict reverting the change afterwards (check " +
+                        "the notebook's sync status and retry); or a new outline added to a page that has none, which " +
+                        "OneNote ignores (the page needs body text first).");
+                }
             }
         }
         finally

@@ -89,7 +89,7 @@ public sealed class OneMoreTools
         if (string.IsNullOrWhiteSpace(query)) throw new McpException("A query is required for search_titles.");
 
         string xml;
-        int? skipped = null;
+        LocalTitleSearch? local = null;
         try
         {
             xml = await ReadContent(OneMoreCommand.SearchTitles(query, notebook), cancellationToken);
@@ -97,17 +97,23 @@ public sealed class OneMoreTools
         catch (McpException ex) when (ex.Message.Contains(SearchTitlesBridgeError, StringComparison.Ordinal))
         {
             _log.LogWarning("OneMore's SearchTitles is unavailable through its add-in; matching titles locally.");
-            (xml, skipped) = await SearchTitlesLocally(query, notebook, cancellationToken);
+            local = await SearchTitlesLocally(query, notebook, cancellationToken);
+            xml = local.Xml;
         }
 
         if (AsXml(format)) return xml;
 
         var markdown = OneNoteContent.SearchResultsToMarkdown(xml);
-        if (skipped is null) return markdown;
+        if (local is null) return markdown;
 
         var note = "*(OneMore's own title search is unavailable, so titles were matched locally: every word or quoted "
             + "phrase has to appear. OR, NOT, wildcards, '>' sorting and #hashtag filters aren't supported.";
-        if (skipped > 0) note += $" {skipped} section(s) couldn't be read and were skipped.";
+        if (local.SkippedSections > 0) note += $" {local.SkippedSections} section(s) couldn't be read and were skipped.";
+        if (local.UnreachableNotebooks.Count > 0)
+        {
+            note += $" Not searched, because another open notebook has the same name: "
+                + $"{string.Join(", ", local.UnreachableNotebooks.Select(n => $"'{n}'"))}.";
+        }
         return markdown + "\n\n" + note + ")*";
     }
 
@@ -354,6 +360,12 @@ public sealed class OneMoreTools
     // only works when the add-in doesn't answer and the CLI runs the command in-process instead.
     private const string SearchTitlesBridgeError = "Unknown command 'SearchTitlesCommand'";
 
+    /// <summary>What a local title search found, and what it couldn't search.</summary>
+    /// <param name="Xml">SearchTitles-style results XML</param>
+    /// <param name="SkippedSections">How many sections the CLI couldn't read</param>
+    /// <param name="UnreachableNotebooks">Notebooks left out because an earlier open notebook has the same name</param>
+    private sealed record LocalTitleSearch(string Xml, int SkippedSections, IReadOnlyList<string> UnreachableNotebooks);
+
     /// <summary>
     /// Matches page titles without OneMore's SearchTitles: lists every notebook's sections with one
     /// GetHierarchy call, then reads each chosen section's pages with another, matching titles via
@@ -364,8 +376,8 @@ public sealed class OneMoreTools
     /// <param name="notebook">
     /// Searches notebooks whose name contains this, as SearchTitles does; null for every open notebook
     /// </param>
-    /// <returns>SearchTitles-style results XML, and how many sections were skipped</returns>
-    private async Task<(string Xml, int Skipped)> SearchTitlesLocally(
+    /// <returns>The results, with what was skipped</returns>
+    private async Task<LocalTitleSearch> SearchTitlesLocally(
         string query, string? notebook, CancellationToken cancellationToken)
     {
         var terms = TitleSearch.ParseTerms(query);
@@ -374,14 +386,14 @@ public sealed class OneMoreTools
         // Read every notebook so the filter can match names partially, the way SearchTitles does.
         var hierarchy = await ReadContent(OneMoreCommand.GetHierarchy(), cancellationToken);
 
-        IReadOnlyList<TitleSearch.SectionRef>? sections;
-        try { sections = TitleSearch.ListSections(hierarchy, notebook); }
+        TitleSearch.SectionList? list;
+        try { list = TitleSearch.ListSections(hierarchy, notebook); }
         catch (ArgumentException ex) { throw new McpException($"OneMore CLI 'GetHierarchy' failed: {ex.Message}", ex); }
-        if (sections is null) throw new McpException($"Notebook '{notebook}' was not found.");
+        if (list is null) throw new McpException($"Notebook '{notebook}' was not found.");
 
         var pages = new List<XElement>();
         var skipped = 0;
-        foreach (var section in sections)
+        foreach (var section in list.Sections)
         {
             string sectionXml;
             try
@@ -407,7 +419,8 @@ public sealed class OneMoreTools
             pages.AddRange(matches);
         }
 
-        return (TitleSearch.BuildResults(query, pages, skipped), skipped);
+        return new LocalTitleSearch(
+            TitleSearch.BuildResults(query, pages, skipped, list.UnreachableNotebooks), skipped, list.UnreachableNotebooks);
     }
 
     /// <summary>Runs a command, throws on a non-zero exit, and returns stdout. Used by write/action tools.</summary>

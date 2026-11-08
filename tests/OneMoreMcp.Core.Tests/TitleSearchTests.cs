@@ -54,7 +54,7 @@ public class TitleSearchTests
                 new TitleSearch.SectionRef("Work", "Archive/Old/2024"),
                 new TitleSearch.SectionRef("Home", "Lists"),
             },
-            TitleSearch.ListSections(xml));
+            TitleSearch.ListSections(xml)!.Sections);
     }
 
     private const string TwoNotebooks =
@@ -68,7 +68,7 @@ public class TitleSearchTests
     public void ListSections_filter_matches_notebook_names_partially_ignoring_case_as_SearchTitles_does()
     {
         Assert.Equal(new[] { "Work", "WorkArchive" },
-            TitleSearch.ListSections(TwoNotebooks, "work")!.Select(s => s.Notebook).ToArray());
+            TitleSearch.ListSections(TwoNotebooks, "work")!.Sections.Select(s => s.Notebook).ToArray());
     }
 
     [Theory]
@@ -76,7 +76,7 @@ public class TitleSearchTests
     [InlineData("*")]
     public void ListSections_without_a_filter_keeps_every_notebook(string? filter)
     {
-        Assert.Equal(3, TitleSearch.ListSections(TwoNotebooks, filter)!.Count);
+        Assert.Equal(3, TitleSearch.ListSections(TwoNotebooks, filter)!.Sections.Count);
     }
 
     [Fact]
@@ -87,9 +87,29 @@ public class TitleSearchTests
     }
 
     [Fact]
+    public void ListSections_leaves_out_a_notebook_whose_name_an_earlier_one_already_has()
+    {
+        // The CLI resolves --notebook by name, ignoring case, and takes the first match, so the second
+        // "Notes" can't be reached; searching it would only read the first one again.
+        var xml =
+            $"<one:Notebooks xmlns:one=\"{Ns}\">" +
+            "<one:Notebook name=\"Notes\" ID=\"{A}\"><one:Section name=\"General\" /></one:Notebook>" +
+            "<one:Notebook name=\"NOTES\" ID=\"{B}\"><one:Section name=\"General\" /></one:Notebook>" +
+            "<one:Notebook name=\"Home\" ID=\"{C}\"><one:Section name=\"Lists\" /></one:Notebook>" +
+            "</one:Notebooks>";
+
+        var list = TitleSearch.ListSections(xml)!;
+
+        Assert.Equal(
+            new[] { new TitleSearch.SectionRef("Notes", "General"), new TitleSearch.SectionRef("Home", "Lists") },
+            list.Sections);
+        Assert.Equal(new[] { "NOTES" }, list.UnreachableNotebooks);
+    }
+
+    [Fact]
     public void ListSections_is_empty_for_blank_output_and_throws_for_a_cli_message()
     {
-        Assert.Empty(TitleSearch.ListSections("")!);
+        Assert.Empty(TitleSearch.ListSections("")!.Sections);
         var ex = Assert.Throws<ArgumentException>(() => TitleSearch.ListSections("Cannot connect to OneNote"));
         Assert.Contains("Cannot connect to OneNote", ex.Message);
     }
@@ -126,11 +146,20 @@ public class TitleSearchTests
     {
         var page = new XElement("Page", new XAttribute("id", "{1}"), new XAttribute("path", "Work/Ideas/Roadmap"));
 
-        var xml = TitleSearch.BuildResults("roadmap", new[] { page }, skippedSections: 2);
+        var xml = TitleSearch.BuildResults("roadmap", new[] { page }, skippedSections: 2, new[] { "Notes", "Home" });
 
         var root = XElement.Parse(xml);
         Assert.Equal("1", (string?)root.Attribute("count"));
         Assert.Equal("2", (string?)root.Attribute("skippedSections"));
+        Assert.Equal("Notes; Home", (string?)root.Attribute("unreachableNotebooks"));
         Assert.Equal("- Work/Ideas/Roadmap", OneNoteContent.SearchResultsToMarkdown(xml));
+    }
+
+    [Fact]
+    public void BuildResults_leaves_out_the_skip_attributes_when_nothing_was_skipped()
+    {
+        var root = XElement.Parse(TitleSearch.BuildResults("roadmap", Array.Empty<XElement>(), skippedSections: 0));
+        Assert.Null(root.Attribute("skippedSections"));
+        Assert.Null(root.Attribute("unreachableNotebooks"));
     }
 }

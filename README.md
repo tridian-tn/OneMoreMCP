@@ -291,6 +291,8 @@ same shape, marked `source="local"`, and the markdown says the fallback ran.
   `WorkArchive`. Omitting it searches every open notebook.
 - It's slower: one CLI call per section, so roughly 10–30 seconds on large notebooks. A section the CLI
   can't read is skipped, and the result says how many were.
+- The CLI finds a notebook by name, so if two open notebooks share a name, only the first can be
+  searched. The result names any it had to leave out.
 
 ## Appending vs. writing
 

@@ -530,6 +530,26 @@ public class OneMoreToolsTests
     }
 
     [Fact]
+    public async Task Search_titles_local_match_says_which_same_named_notebook_it_couldnt_search()
+    {
+        // Two open notebooks named "Notes" with the same section: the CLI reaches only the first by name.
+        var (tools, runner) = Build();
+        runner.FailWith["SearchTitles"] = SearchTitlesBridgeFailure;
+        runner.HierarchyFor = argv => Section(argv) is null
+            ? "<one:Notebooks xmlns:one=\"http://schemas.microsoft.com/office/onenote/2013/onenote\">" +
+              "<one:Notebook name=\"Notes\" ID=\"{A}\"><one:Section name=\"General\" /></one:Notebook>" +
+              "<one:Notebook name=\"Notes\" ID=\"{B}\"><one:Section name=\"General\" /></one:Notebook>" +
+              "</one:Notebooks>"
+            : SectionWithPages("Roadmap");
+
+        var md = await tools.SearchTitles("roadmap");
+
+        Assert.Single(md.Split('\n'), line => line == "- Notes/General/Roadmap");
+        Assert.Single(runner.Commands, c => Section(c.Build()) == "General");
+        Assert.Contains("Not searched, because another open notebook has the same name: 'Notes'", md);
+    }
+
+    [Fact]
     public async Task Search_titles_local_match_reports_an_unknown_notebook()
     {
         var (tools, runner) = Build();

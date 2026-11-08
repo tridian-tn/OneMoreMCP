@@ -15,8 +15,16 @@ public static partial class TitleSearch
     public sealed record SectionRef(string Notebook, string Path);
 
     /// <summary>
+    /// The sections to search, and the notebooks left out because an earlier open notebook has the same
+    /// name. The CLI addresses a section by notebook name and takes the first notebook of that name, so a
+    /// later one can't be reached; reading it would just read the first one again.
+    /// </summary>
+    public sealed record SectionList(IReadOnlyList<SectionRef> Sections, IReadOnlyList<string> UnreachableNotebooks);
+
+    /// <summary>
     /// Lists every section in <c>GetHierarchy</c> output, including sections nested in section groups,
-    /// for the notebooks a filter picks. Recycle bins are skipped.
+    /// for the notebooks a filter picks. Recycle bins are skipped, and so is any notebook that shares its
+    /// name with an earlier one, which is reported in <see cref="SectionList.UnreachableNotebooks"/>.
     /// </summary>
     /// <param name="hierarchyXml">GetHierarchy output without <c>--section</c></param>
     /// <param name="notebookFilter">
@@ -25,16 +33,22 @@ public static partial class TitleSearch
     /// </param>
     /// <returns>The sections in hierarchy order, or null when a filter is given and no notebook matches it</returns>
     /// <exception cref="ArgumentException">The output isn't XML, which means the CLI printed an error</exception>
-    public static IReadOnlyList<SectionRef>? ListSections(string hierarchyXml, string? notebookFilter = null)
+    public static SectionList? ListSections(string hierarchyXml, string? notebookFilter = null)
     {
         var filtered = !string.IsNullOrWhiteSpace(notebookFilter) && notebookFilter != "*";
-        if (string.IsNullOrWhiteSpace(hierarchyXml)) return filtered ? null : Array.Empty<SectionRef>();
+        if (string.IsNullOrWhiteSpace(hierarchyXml))
+        {
+            return filtered ? null : new SectionList(Array.Empty<SectionRef>(), Array.Empty<string>());
+        }
 
         XDocument doc;
         try { doc = XDocument.Parse(hierarchyXml); }
         catch (System.Xml.XmlException) { throw new ArgumentException(hierarchyXml.Trim()); }
 
         var sections = new List<SectionRef>();
+        var unreachable = new List<string>();
+        // The CLI matches notebook names this way when it resolves --notebook.
+        var seen = new HashSet<string>(StringComparer.InvariantCultureIgnoreCase);
         var matched = 0;
         foreach (var notebook in doc.Root!.DescendantsAndSelf(OneNoteSchema.Ns + "Notebook"))
         {
@@ -42,9 +56,14 @@ public static partial class TitleSearch
             if (filtered && !name.Contains(notebookFilter!, StringComparison.OrdinalIgnoreCase)) continue;
 
             matched++;
+            if (!seen.Add(name))
+            {
+                unreachable.Add(name);
+                continue;
+            }
             CollectSections(notebook, name, prefix: "", sections);
         }
-        return filtered && matched == 0 ? null : sections;
+        return filtered && matched == 0 ? null : new SectionList(sections, unreachable);
     }
 
     /// <summary>
@@ -105,13 +124,19 @@ public static partial class TitleSearch
     /// <param name="query">The original query, echoed as SearchTitles does</param>
     /// <param name="pages">The pages from <see cref="MatchPages"/></param>
     /// <param name="skippedSections">How many sections couldn't be read</param>
-    public static string BuildResults(string query, IReadOnlyCollection<XElement> pages, int skippedSections)
+    /// <param name="unreachableNotebooks">Notebooks left out because they share a name with an earlier one</param>
+    public static string BuildResults(
+        string query, IReadOnlyCollection<XElement> pages, int skippedSections, IReadOnlyList<string>? unreachableNotebooks = null)
     {
         var root = new XElement("Results",
             new XAttribute("query", query),
             new XAttribute("count", pages.Count),
             new XAttribute("source", "local"));
         if (skippedSections > 0) root.Add(new XAttribute("skippedSections", skippedSections));
+        if (unreachableNotebooks is { Count: > 0 })
+        {
+            root.Add(new XAttribute("unreachableNotebooks", string.Join("; ", unreachableNotebooks)));
+        }
         root.Add(pages);
         return root.ToString();
     }

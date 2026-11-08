@@ -225,7 +225,7 @@ OneMoreMcp.exe --disable-autostart
 | `list_hierarchy` | Notebook/section/page tree (markdown or raw XML). | — |
 | `get_page` | A page's content by notebook+section+page, or `current`; markdown (default) or XML. | — |
 | `search` | Full-text search a **notebook** (required) for pages matching a query; optional section/page scope. | — |
-| `search_titles` | Search page **titles** across a notebook — quicker/more precise for finding a page by name. | — |
+| `search_titles` | Search page **titles** across a notebook — quicker/more precise for finding a page by name. Falls back to a local title match when OneMore can't run its own (see below). | — |
 | `search_hashtags` | Search OneNote hashtags; optional notebook/section/page scope. | — |
 | `sync` | Sync a notebook's pending changes to storage (flush recent edits). | — |
 | `append_to_page` | **Append** text (markdown/html/plain) to a page. Fetches, adds, writes back — never sends the page's existing content to the model, never overwrites. | **ungated** |
@@ -273,6 +273,24 @@ Two faults in OneMore's own source explain the silence
 - `Page.OptimizeForSave` drops any child element whose `omHash` still matches its content — a
   deliberate "unchanged, skip" optimisation which also means **re-sending a stale copy of a page
   silently does nothing**. Always write back XML you've just read.
+
+## Title search falls back to a local match
+
+OneMore's CLI usually hands a command to the running OneMore add-in to run. For `SearchTitles` the
+add-in can't find it: the CLI asks for `SearchTitlesCommand`, but the class is `SearchTitleCommand`, so
+the add-in answers `Unknown command`. It only works when the add-in doesn't answer and the CLI runs the
+command itself, which is rare while OneNote is up. This is a OneMore bug and isn't specific to 8.0.0.
+
+So when `search_titles` gets exactly that error, it matches titles itself. It lists the sections with
+one `GetHierarchy` call, then reads each section's pages with another. The results come back in the
+same shape, marked `source="local"`, and the markdown says the fallback ran.
+
+- Every word or quoted phrase has to appear in the title, ignoring case and order. OR, NOT,
+  parentheses, wildcards, `>` sorting and `#hashtag` filters aren't supported.
+- The notebook filter matches names partially, as `SearchTitles` does, so `Work` also searches
+  `WorkArchive`. Omitting it searches every open notebook.
+- It's slower: one CLI call per section, so roughly 10–30 seconds on large notebooks. A section the CLI
+  can't read is skipped, and the result says how many were.
 
 ## Appending vs. writing
 
@@ -374,7 +392,7 @@ The server is a **process orchestrator**: each tool builds a `OneMoreCli.exe` in
 | `list_hierarchy` | `GetHierarchy [--notebook] [--section] [--books]` (XML; `--books` yields JSON) |
 | `get_page` | `GetPage --notebook --section --page` (all three required), or `--current` |
 | `search` | `Search --notebook --query [--section] [--page]` (results rendered as page paths) |
-| `search_titles` | `SearchTitles --query [--notebook]` (page paths) |
+| `search_titles` | `SearchTitles --query [--notebook]` (page paths); on the add-in's `Unknown command` error, `GetHierarchy` → `GetHierarchy --notebook --section` per section, matched locally |
 | `search_hashtags` | `SearchHashtags --query [--allTags] [--notebook] [--section] [--page]` |
 | `sync` | `Sync --notebook` |
 | `append_to_page` | `GetPage` (raw) → local append → `PutPage --infile <temp> --force` → `Sync` (if `SyncAfterWrite`) |

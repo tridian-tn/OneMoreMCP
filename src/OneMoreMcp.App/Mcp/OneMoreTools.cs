@@ -76,15 +76,39 @@ public sealed class OneMoreTools
     }
 
     [McpServerTool(Name = "search_titles")]
-    [Description("Search page TITLES across a notebook — faster and more precise than full-text search for finding a page by name. Returns matching page paths (markdown) or raw XML.")]
+    [Description("Search page TITLES across a notebook — faster and more precise than full-text search for finding a page by name. "
+        + "Returns matching page paths (markdown) or raw XML. If OneMore's own title search is unavailable, titles are matched "
+        + "locally instead (every word or quoted phrase must appear) and the result says so; that's slower on large notebooks.")]
     public async Task<string> SearchTitles(
         [Description("The title query.")] string query,
         [Description("Notebook to search. Omit to search all loaded notebooks.")] string? notebook = null,
         [Description("Output format: 'markdown' (default) or 'xml'.")] string? format = null,
         CancellationToken cancellationToken = default)
     {
-        var xml = await ReadContent(OneMoreCommand.SearchTitles(query, notebook), cancellationToken);
-        return AsXml(format) ? xml : OneNoteContent.SearchResultsToMarkdown(xml);
+        // A blank query would leave out --query, a required option, and drop the CLI into its prompt.
+        if (string.IsNullOrWhiteSpace(query)) throw new McpException("A query is required for search_titles.");
+
+        string xml;
+        int? skipped = null;
+        try
+        {
+            xml = await ReadContent(OneMoreCommand.SearchTitles(query, notebook), cancellationToken);
+        }
+        catch (McpException ex) when (ex.Message.Contains(SearchTitlesBridgeError, StringComparison.Ordinal))
+        {
+            _log.LogWarning("OneMore's SearchTitles is unavailable through its add-in; matching titles locally.");
+            (xml, skipped) = await SearchTitlesLocally(query, notebook, cancellationToken);
+        }
+
+        if (AsXml(format)) return xml;
+
+        var markdown = OneNoteContent.SearchResultsToMarkdown(xml);
+        if (skipped is null) return markdown;
+
+        var note = "*(OneMore's own title search is unavailable, so titles were matched locally: every word or quoted "
+            + "phrase has to appear. OR, NOT, wildcards, '>' sorting and #hashtag filters aren't supported.";
+        if (skipped > 0) note += $" {skipped} section(s) couldn't be read and were skipped.";
+        return markdown + "\n\n" + note + ")*";
     }
 
     [McpServerTool(Name = "search_hashtags")]
@@ -323,6 +347,65 @@ public sealed class OneMoreTools
         if (!result.Ok)
             throw new McpException(
                 $"OneMore CLI '{command.Name}' failed (exit {result.ExitCode}): {Trim(result.StdErr, result.StdOut)}");
+    }
+
+    // OneMore's CLI relays a command to the add-in as "<CommandName>Command", and the add-in looks that up
+    // as a class name. SearchTitles' class is SearchTitleCommand, so the add-in replies with this error. It
+    // only works when the add-in doesn't answer and the CLI runs the command in-process instead.
+    private const string SearchTitlesBridgeError = "Unknown command 'SearchTitlesCommand'";
+
+    /// <summary>
+    /// Matches page titles without OneMore's SearchTitles: lists every notebook's sections with one
+    /// GetHierarchy call, then reads each chosen section's pages with another, matching titles via
+    /// <see cref="TitleSearch"/>. A section the CLI can't read is skipped and counted rather than failing
+    /// the whole search.
+    /// </summary>
+    /// <param name="query">The title query</param>
+    /// <param name="notebook">
+    /// Searches notebooks whose name contains this, as SearchTitles does; null for every open notebook
+    /// </param>
+    /// <returns>SearchTitles-style results XML, and how many sections were skipped</returns>
+    private async Task<(string Xml, int Skipped)> SearchTitlesLocally(
+        string query, string? notebook, CancellationToken cancellationToken)
+    {
+        var terms = TitleSearch.ParseTerms(query);
+        if (terms.Count == 0) throw new McpException("The query has no words to match.");
+
+        // Read every notebook so the filter can match names partially, the way SearchTitles does.
+        var hierarchy = await ReadContent(OneMoreCommand.GetHierarchy(), cancellationToken);
+
+        IReadOnlyList<TitleSearch.SectionRef>? sections;
+        try { sections = TitleSearch.ListSections(hierarchy, notebook); }
+        catch (ArgumentException ex) { throw new McpException($"OneMore CLI 'GetHierarchy' failed: {ex.Message}", ex); }
+        if (sections is null) throw new McpException($"Notebook '{notebook}' was not found.");
+
+        var pages = new List<XElement>();
+        var skipped = 0;
+        foreach (var section in sections)
+        {
+            string sectionXml;
+            try
+            {
+                sectionXml = await ReadContent(OneMoreCommand.GetHierarchy(section.Notebook, section.Path), cancellationToken);
+            }
+            catch (McpException ex)
+            {
+                _log.LogWarning("Skipped section '{Notebook}/{Section}' in a local title search: {Error}",
+                    section.Notebook, section.Path, ex.Message);
+                skipped++;
+                continue;
+            }
+
+            var matches = TitleSearch.MatchPages(sectionXml, section, terms);
+            if (matches is null)
+            {
+                skipped++;
+                continue;
+            }
+            pages.AddRange(matches);
+        }
+
+        return (TitleSearch.BuildResults(query, pages, skipped), skipped);
     }
 
     /// <summary>Runs a command, throws on a non-zero exit, and returns stdout. Used by write/action tools.</summary>

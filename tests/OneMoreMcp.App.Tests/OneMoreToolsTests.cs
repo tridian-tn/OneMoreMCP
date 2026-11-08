@@ -1,3 +1,4 @@
+using System.Xml.Linq;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using ModelContextProtocol;
@@ -414,6 +415,131 @@ public class OneMoreToolsTests
         Assert.Contains("--output", runner.Commands.Single(c => c.Name == "SearchTitles").Build());
     }
 
+    // What OneMore's CLI prints when its add-in can't resolve SearchTitles (the class is SearchTitleCommand).
+    private static readonly CliResult SearchTitlesBridgeFailure = new(1,
+        "Error: System.Exception\r\nMessage: Unknown command 'SearchTitlesCommand'\r\nSource: OneMoreCli\r\n", "");
+
+    private const string WorkNotebookXml =
+        "<one:Notebook xmlns:one=\"http://schemas.microsoft.com/office/onenote/2013/onenote\" name=\"Work\">" +
+        "<one:Section name=\"Ideas\" />" +
+        "<one:SectionGroup name=\"Archive\"><one:Section name=\"2025\" /></one:SectionGroup>" +
+        "<one:SectionGroup name=\"OneNote_RecycleBin\" isRecycleBin=\"true\">" +
+        "<one:Section name=\"Deleted Pages\" isInRecycleBin=\"true\" /></one:SectionGroup>" +
+        "</one:Notebook>";
+
+    private static string SectionWithPages(params string[] names) =>
+        "<one:Section xmlns:one=\"http://schemas.microsoft.com/office/onenote/2013/onenote\">" +
+        string.Concat(names.Select((n, i) => $"<one:Page ID=\"{{{n}}}\" name=\"{n}\" lastModifiedTime=\"2026-11-0{i + 1}T10:00:00.000Z\" />")) +
+        "</one:Section>";
+
+    private static string? Section(IReadOnlyList<string> argv)
+    {
+        var i = argv.ToList().IndexOf("--section");
+        return i >= 0 ? argv[i + 1] : null;
+    }
+
+    /// <summary>A runner whose SearchTitles fails the way OneMore's add-in bridge does, over the Work notebook.</summary>
+    private static (OneMoreTools tools, FakeRunner runner) BuildWithBrokenSearchTitles(string ideasXml)
+    {
+        var (tools, runner) = Build();
+        runner.FailWith["SearchTitles"] = SearchTitlesBridgeFailure;
+        runner.HierarchyFor = argv => Section(argv) switch
+        {
+            null => WorkNotebookXml,
+            "Ideas" => ideasXml,
+            "Archive/2025" => SectionWithPages("Old roadmap", "Holidays"),
+            var other => throw new InvalidOperationException($"Unexpected section '{other}'"),
+        };
+        return (tools, runner);
+    }
+
+    [Fact]
+    public async Task Search_titles_matches_titles_locally_when_the_add_in_cant_find_the_command()
+    {
+        var (tools, runner) = BuildWithBrokenSearchTitles(SectionWithPages("Roadmap Q3", "Budget"));
+
+        var md = await tools.SearchTitles("roadmap", notebook: "Work");
+
+        Assert.Contains("- Work/Ideas/Roadmap Q3", md);
+        Assert.Contains("- Work/Archive/2025/Old roadmap", md);
+        Assert.DoesNotContain("Budget", md);
+        Assert.Contains("matched locally", md);
+        // The recycle bin's section isn't read.
+        Assert.Equal(new string?[] { null, "Ideas", "Archive/2025" },
+            runner.Commands.Where(c => c.Name == "GetHierarchy").Select(c => Section(c.Build())).ToArray());
+    }
+
+    [Fact]
+    public async Task Search_titles_local_results_keep_the_SearchTitles_xml_shape()
+    {
+        var (tools, _) = BuildWithBrokenSearchTitles(SectionWithPages("Roadmap Q3"));
+
+        var xml = XElement.Parse(await tools.SearchTitles("roadmap", notebook: "Work", format: "xml"));
+
+        Assert.Equal("local", (string?)xml.Attribute("source"));
+        Assert.Equal("2", (string?)xml.Attribute("count"));
+        var page = xml.Elements("Page").First();
+        Assert.Equal("{Roadmap Q3}", (string?)page.Attribute("id"));
+        Assert.Equal("Work/Ideas/Roadmap Q3", (string?)page.Attribute("path"));
+        Assert.Equal("2026-11-01T10:00:00.000Z", (string?)page.Attribute("modified"));
+    }
+
+    [Fact]
+    public async Task Search_titles_local_match_skips_and_counts_a_section_the_cli_cant_read()
+    {
+        // GetHierarchy reports a section it can't find as empty output.
+        var (tools, _) = BuildWithBrokenSearchTitles(ideasXml: "");
+
+        var md = await tools.SearchTitles("roadmap", notebook: "Work");
+
+        Assert.Contains("- Work/Archive/2025/Old roadmap", md);
+        Assert.Contains("1 section(s) couldn't be read", md);
+    }
+
+    [Fact]
+    public async Task Search_titles_local_match_reports_an_unknown_notebook()
+    {
+        var (tools, runner) = Build();
+        runner.FailWith["SearchTitles"] = SearchTitlesBridgeFailure;
+        runner.HierarchyFor = _ => WorkNotebookXml;
+
+        var ex = await Assert.ThrowsAsync<McpException>(() => tools.SearchTitles("roadmap", notebook: "Nope"));
+        Assert.Contains("'Nope' was not found", ex.Message);
+        // Only the notebook list was read; no section was searched.
+        Assert.Single(runner.Commands, c => c.Name == "GetHierarchy");
+    }
+
+    [Fact]
+    public async Task Search_titles_local_match_reads_every_notebook_so_the_filter_can_match_partially()
+    {
+        var (tools, runner) = BuildWithBrokenSearchTitles(SectionWithPages("Roadmap Q3"));
+
+        await tools.SearchTitles("roadmap", notebook: "work");
+
+        var first = runner.Commands.First(c => c.Name == "GetHierarchy").Build();
+        Assert.DoesNotContain("--notebook", first);
+    }
+
+    [Fact]
+    public async Task Search_titles_surfaces_other_cli_failures_without_falling_back()
+    {
+        var (tools, runner) = Build();
+        runner.FailWith["SearchTitles"] = new CliResult(1, "Error: Notebook not found: Nope", "");
+
+        var ex = await Assert.ThrowsAsync<McpException>(() => tools.SearchTitles("roadmap", notebook: "Nope"));
+        Assert.Contains("Notebook not found", ex.Message);
+        Assert.DoesNotContain(runner.Commands, c => c.Name == "GetHierarchy");
+    }
+
+    [Fact]
+    public async Task Search_titles_requires_a_query()
+    {
+        // A blank query would leave out the required --query and drop the CLI into its prompt.
+        var (tools, runner) = Build();
+        await Assert.ThrowsAsync<McpException>(() => tools.SearchTitles("  ", notebook: "Work"));
+        Assert.Empty(runner.Commands);
+    }
+
     [Fact]
     public async Task Search_renders_result_paths_and_passes_the_notebook()
     {
@@ -590,6 +716,12 @@ public class OneMoreToolsTests
         /// <summary>Exit code the fake reports.</summary>
         public int ExitCode { get; set; } = 0;
 
+        /// <summary>Per-command result returned instead of running it, for simulating one command's failure.</summary>
+        public Dictionary<string, CliResult> FailWith { get; } = new();
+
+        /// <summary>GetHierarchy payload chosen from the argv, for tests that need different sections to differ.</summary>
+        public Func<IReadOnlyList<string>, string>? HierarchyFor { get; set; }
+
         /// <summary>What a subsequent GetPage returns once a PutPage has "landed" — simulates real persistence
         /// so tests exercise the same before/after read-back the app does. Null until the first PutPage.</summary>
         public string? PersistedPageXml { get; private set; }
@@ -631,6 +763,7 @@ public class OneMoreToolsTests
         {
             Commands.Add(command);
             var argv = command.Build();
+            if (FailWith.TryGetValue(command.Name, out var failure)) return Task.FromResult(failure);
 
             // Capture the XML handed to PutPage via --infile so tests can assert on it, and simulate the
             // write landing so a follow-up GetPage reflects it (unless a no-op write is being simulated).
@@ -662,7 +795,7 @@ public class OneMoreToolsTests
             var payload = Content.TryGetValue(command.Name, out var c) ? c
                 : command.Name == "GetPage" && argv.Contains("--current") && CurrentPageXml != null ? CurrentPageXml
                 : command.Name == "GetPage" ? (PageMissing ? "" : PersistedPageXml ?? SamplePageXml)
-                : command.Name == "GetHierarchy" ? SectionXml()
+                : command.Name == "GetHierarchy" ? HierarchyFor?.Invoke(argv) ?? SectionXml()
                 : "";
 
             // With --output the CLI writes the payload to the file and stdout carries only diagnostics;

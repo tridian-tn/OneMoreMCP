@@ -32,6 +32,12 @@ public class OneMoreToolsTests
         "<one:OE><one:T><![CDATA[Updated]]></one:T></one:OE>" +
         "</one:OEChildren></one:Outline></one:Page>";
 
+    // A page with a title and no body, like one fresh from create_page.
+    private const string TitleOnlyPageXml =
+        "<?xml version=\"1.0\"?>" +
+        "<one:Page xmlns:one=\"http://schemas.microsoft.com/office/onenote/2013/onenote\" ID=\"{P1}\">" +
+        "<one:Title><one:OE><one:T><![CDATA[Title]]></one:T></one:OE></one:Title></one:Page>";
+
     private static (OneMoreTools tools, FakeRunner runner) Build(
         bool allowWrites = false, string? exportRoot = null, bool syncAfterWrite = true)
     {
@@ -402,6 +408,21 @@ public class OneMoreToolsTests
     }
 
     [Fact]
+    public async Task Append_to_page_refuses_a_page_with_no_outline_without_writing()
+    {
+        // OneNote ignores a new top-level outline, so the write could never land. Only the read may run.
+        var (tools, runner) = Build();
+        runner.InitialPageXml = TitleOnlyPageXml;
+
+        var ex = await Assert.ThrowsAsync<McpException>(
+            () => tools.AppendToPage("note", notebook: "N", section: "S", page: "P", format: "plain"));
+
+        Assert.Contains("no outline", ex.Message);
+        Assert.Contains("typing a line", ex.Message);
+        Assert.Equal(new[] { "GetPage" }, runner.Commands.Select(c => c.Name).ToArray());
+    }
+
+    [Fact]
     public async Task Search_titles_routes_through_output_and_lists_page_paths()
     {
         var (tools, runner) = Build();
@@ -590,6 +611,9 @@ public class OneMoreToolsTests
         /// <summary>Exit code the fake reports.</summary>
         public int ExitCode { get; set; } = 0;
 
+        /// <summary>What GetPage returns until a PutPage has landed.</summary>
+        public string InitialPageXml { get; set; } = SamplePageXml;
+
         /// <summary>What a subsequent GetPage returns once a PutPage has "landed" — simulates real persistence
         /// so tests exercise the same before/after read-back the app does. Null until the first PutPage.</summary>
         public string? PersistedPageXml { get; private set; }
@@ -661,7 +685,7 @@ public class OneMoreToolsTests
 
             var payload = Content.TryGetValue(command.Name, out var c) ? c
                 : command.Name == "GetPage" && argv.Contains("--current") && CurrentPageXml != null ? CurrentPageXml
-                : command.Name == "GetPage" ? (PageMissing ? "" : PersistedPageXml ?? SamplePageXml)
+                : command.Name == "GetPage" ? (PageMissing ? "" : PersistedPageXml ?? InitialPageXml)
                 : command.Name == "GetHierarchy" ? SectionXml()
                 : "";
 

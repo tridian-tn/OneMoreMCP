@@ -103,7 +103,8 @@ public sealed class OneMoreTools
     [McpServerTool(Name = "append_to_page")]
     [Description("Append text to the end of a OneNote page WITHOUT sending the page's existing content to the model. "
         + "The server fetches the page locally, adds your text as new paragraph(s), and writes it back — it can only add, "
-        + "never overwrite. Always available (independent of the write gate). Requires notebook + section + page.")]
+        + "never overwrite. Always available (independent of the write gate). Requires notebook + section + page. "
+        + "Refuses a page with no body yet (title only), since OneNote won't accept new body content on one.")]
     public async Task<string> AppendToPage(
         [Description("The text to append. One paragraph per line.")] string text,
         [Description("Notebook name.")] string notebook,
@@ -119,7 +120,8 @@ public sealed class OneMoreTools
         // "before" snapshot PutPageXml uses to verify the write actually took effect.
         var pageXml = await ReadPageXml(notebook, section, page, current: false, cancellationToken);
 
-        // 2. Insert the new text, preserving everything else. PageAppender lives in the pure Core
+        // 2. Insert the new text, preserving everything else. This refuses a page with no outline before
+        // anything's written, since OneNote would discard the content. PageAppender lives in the pure Core
         // project and throws plain ArgumentException; translate to McpException so the message
         // reaches the client instead of being replaced with a generic one.
         string updated;

@@ -262,8 +262,11 @@ pruned. `InsertToc` — an unrelated command that builds content — is equally 
 that already exists works fine, which is why `append_to_page` and `update_page` are reliable.
 
 So a page created here stays empty until someone types in it in OneNote; after that, the normal write
-tools work on it. Because the CLI has no delete command, failed attempts leave junk "Untitled" pages
-behind, so `update_page` checks its target exists before writing rather than producing one.
+tools work on it. `append_to_page` refuses a page with no outline up front rather than sending a write
+OneNote would discard. Typing a line in OneNote gives the page an outline, and OneMore's `AddHashtag`
+also creates one (a tag bank). Because the CLI has no delete command, failed attempts leave junk
+"Untitled" pages behind, so `update_page` checks its target exists before writing rather than producing
+one.
 
 Two faults in OneMore's own source explain the silence
 ([`PutPageCommand.cs`](https://github.com/stevencohn/OneMore/blob/main/OneMore/Cli/Commands/PutPageCommand.cs)):

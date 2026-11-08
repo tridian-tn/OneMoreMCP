@@ -38,6 +38,11 @@ public class OneMoreToolsTests
         "<one:Page xmlns:one=\"http://schemas.microsoft.com/office/onenote/2013/onenote\" ID=\"{P1}\">" +
         "<one:Title><one:OE><one:T><![CDATA[Title]]></one:T></one:OE></one:Title></one:Page>";
 
+    // The outline OneMore's AddHashtag creates, straight after the title.
+    private const string TagBankOutlineXml =
+        "<one:Outline><one:Meta name=\"omTaggingBank\" content=\"1\" /><one:OEChildren>" +
+        "<one:OE><one:T><![CDATA[#todo]]></one:T></one:OE></one:OEChildren></one:Outline>";
+
     /// <summary>The sample page as OneNote reports it, stamped with the given modified time.</summary>
     private static string PageModifiedAt(string lastModifiedTime) =>
         SamplePageXml.Replace("ID=\"{P1}\"", $"ID=\"{{P1}}\" lastModifiedTime=\"{lastModifiedTime}\"");
@@ -561,6 +566,38 @@ public class OneMoreToolsTests
         Assert.Contains("no outline", ex.Message);
         Assert.Contains("typing a line", ex.Message);
         Assert.Equal(new[] { "GetPage" }, runner.Commands.Select(c => c.Name).ToArray());
+    }
+
+    [Fact]
+    public async Task Append_to_page_refuses_a_page_whose_only_outline_is_a_tag_bank_without_writing()
+    {
+        // Text in the bank would be deleted along with the page's last hashtag. Only the read may run.
+        var (tools, runner) = Build();
+        runner.InitialPageXml = TitleOnlyPageXml.Replace("</one:Page>", TagBankOutlineXml + "</one:Page>");
+
+        var ex = await Assert.ThrowsAsync<McpException>(
+            () => tools.AppendToPage("note", notebook: "N", section: "S", page: "P", format: "plain"));
+
+        Assert.Contains("tag bank", ex.Message);
+        Assert.Equal(new[] { "GetPage" }, runner.Commands.Select(c => c.Name).ToArray());
+    }
+
+    [Fact]
+    public async Task Append_to_page_writes_to_the_body_and_leaves_the_tag_bank_alone()
+    {
+        var (tools, runner) = Build(syncAfterWrite: false);
+        runner.InitialPageXml = SamplePageXml.Replace("<one:Outline>", TagBankOutlineXml + "<one:Outline>");
+
+        var result = await tools.AppendToPage("note", notebook: "N", section: "S", page: "P", format: "plain");
+
+        Assert.Equal("Appended.", result);
+        XNamespace one = "http://schemas.microsoft.com/office/onenote/2013/onenote";
+        var outlines = XDocument.Parse(runner.LastInfileXml)
+            .Descendants(one + "Outline")
+            .Select(outline => outline.Descendants(one + "T").Select(t => t.Value).ToArray())
+            .ToList();
+        Assert.Equal(new[] { "#todo" }, outlines[0]);
+        Assert.Equal(new[] { "Existing", "note" }, outlines[1]);
     }
 
     [Fact]

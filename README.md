@@ -231,7 +231,7 @@ OneMoreMcp.exe --disable-autostart
 | `append_to_page` | **Append** text (markdown/html/plain) to a page. Fetches, adds, writes back — never sends the page's existing content to the model, never overwrites. | **ungated** |
 | `update_page` | Overwrite an **existing** page from raw OneNote page XML (as `get_page` format=xml). Cannot create pages — see below. | gated |
 | `create_page` | Create a new page with a title. The page is created **empty** and can't be given body text — see below. | gated |
-| `add_hashtag` / `remove_hashtag` | Add/remove hashtags on the current page(s). | gated |
+| `add_hashtag` / `remove_hashtag` | Add/remove hashtags on the current page(s). Removing a page's last hashtag deletes its tag bank, including any other text in it. | gated |
 | `export` | Export pages to a folder (HTML/PDF/Word/XML/Markdown/OneNote); confined to `ExportRoot` if set. | gated |
 | `archive` | Archive a notebook (or section) to a `.zip`; confined to `ExportRoot` if set. | gated |
 | `goto` | Navigate OneNote to a page/object. | — |
@@ -263,10 +263,15 @@ that already exists works fine, which is why `append_to_page` and `update_page` 
 
 So a page created here stays empty until someone types in it in OneNote; after that, the normal write
 tools work on it. `append_to_page` refuses a page with no outline up front rather than sending a write
-OneNote would discard. Typing a line in OneNote gives the page an outline, and OneMore's `AddHashtag`
-also creates one (a tag bank). Because the CLI has no delete command, failed attempts leave junk
-"Untitled" pages behind, so `update_page` checks its target exists before writing rather than producing
-one.
+OneNote would discard. Because the CLI has no delete command, failed attempts leave junk "Untitled"
+pages behind, so `update_page` checks its target exists before writing rather than producing one.
+
+**A hashtag doesn't get around this.** OneMore's `AddHashtag` does give a page an outline, its tag bank,
+but text kept there isn't safe: removing the page's last hashtag deletes the whole block, along with
+any text in it. OneNote won't drop the block's `omTaggingBank` marker, and it ignores a second outline
+added alongside it, so the block can't be turned into ordinary body text. `append_to_page` therefore
+never writes into a tag bank. It uses the page's last other outline, and refuses a page whose only
+outline is the bank. `update_page` writes whatever XML it's given, so it can still put text there.
 
 Two faults in OneMore's own source explain the silence
 ([`PutPageCommand.cs`](https://github.com/stevencohn/OneMore/blob/main/OneMore/Cli/Commands/PutPageCommand.cs)):

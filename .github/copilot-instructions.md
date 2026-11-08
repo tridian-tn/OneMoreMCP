@@ -56,6 +56,10 @@ against `OneMoreCli.exe` directly; **guard them, and flag any change that reintr
   it in-process. `search_titles` catches exactly that error and matches titles locally (`TitleSearch`).
   Keep the catch that narrow so other `SearchTitles` failures still surface, and keep the local notebook
   filter a case-insensitive substring match, because that's what `SearchTitles` does.
+- **Don't append into OneMore's tag bank.** `AddHashtag` creates an outline marked with a `one:Meta` named
+  `omTaggingBank`, and `RemoveHashtag` deletes that whole outline when its last hashtag goes, whatever else
+  is in it. `PageAppender` skips the bank and refuses a page whose only outline is the bank. OneNote won't
+  remove the marker and OneMore only checks its name, so match on the name, not its value.
 
 ## Host and safety conventions
 

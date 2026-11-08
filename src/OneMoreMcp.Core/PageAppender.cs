@@ -21,7 +21,7 @@ public enum AppendFormat
 
 /// <summary>
 /// Appends text to a OneNote page by editing the page's XML: it inserts new <c>one:OE</c> paragraphs
-/// into the last outline's <c>one:OEChildren</c> and leaves everything else untouched. This is the
+/// into the last body outline's <c>one:OEChildren</c> and leaves everything else untouched. This is the
 /// engine behind the ungated <c>append_to_page</c> tool — the page's existing content is fetched,
 /// mutated locally, and written back, so it never becomes LLM tokens and can never be overwritten,
 /// only added to.
@@ -31,12 +31,17 @@ public static partial class PageAppender
     private const string NoOutlineMessage =
         "This page has no outline to append to, and OneNote won't accept new body content on a page like " +
         "that, so nothing was written. The page needs some body text first: typing a line in it in OneNote " +
-        "works, and OneMore's AddHashtag also creates a tag-bank outline.";
+        "works.";
+
+    private const string OnlyTagBankMessage =
+        "This page's only outline is OneMore's hashtag tag bank, so nothing was written: OneMore deletes that " +
+        "block, along with any text in it, when the page's last hashtag is removed. The page needs some body " +
+        "text first: typing a line in it in OneNote works.";
 
     /// <summary>
     /// Returns <paramref name="pageXml"/> with <paramref name="text"/> appended as one or more
     /// paragraphs. The input must be a <c>one:Page</c> document (as GetPage emits) with at least one
-    /// outline. Existing outlines and their content are preserved; only new <c>one:OE</c> nodes are added.
+    /// body outline. Existing outlines and their content are preserved; only new <c>one:OE</c> nodes are added.
     /// </summary>
     public static string Append(string pageXml, string text, AppendFormat format)
     {
@@ -64,17 +69,19 @@ public static partial class PageAppender
     }
 
     /// <summary>
-    /// Finds the <c>one:OEChildren</c> to append into: the last outline's last child container, created
-    /// if that outline has none. A page with no outline is refused rather than given one, because OneNote
-    /// ignores a new top-level outline: it takes the write, moves the page's <c>lastModifiedTime</c>, and
-    /// discards the content.
+    /// Finds the <c>one:OEChildren</c> to append into: the last body outline's last child container,
+    /// created if that outline has none. OneMore's tag bank isn't a body outline, because OneMore deletes
+    /// the whole block when the page's last hashtag is removed, whatever else is in it. A page with no
+    /// body outline is refused rather than given one, because OneNote ignores a new top-level outline: it
+    /// takes the write, moves the page's <c>lastModifiedTime</c>, and discards the content.
     /// </summary>
     private static XElement AppendTarget(XElement page)
     {
-        var outline = page.Elements(OneNoteSchema.Outline).LastOrDefault();
+        var outlines = page.Elements(OneNoteSchema.Outline).ToList();
+        var outline = outlines.LastOrDefault(o => !IsTagBank(o));
 
         // No paramName: ArgumentException would add it to the message, and this one reaches the client.
-        if (outline is null) throw new ArgumentException(NoOutlineMessage);
+        if (outline is null) throw new ArgumentException(outlines.Count == 0 ? NoOutlineMessage : OnlyTagBankMessage);
 
         var children = outline.Elements(OneNoteSchema.OEChildren).LastOrDefault();
         if (children is null)
@@ -84,6 +91,16 @@ public static partial class PageAppender
         }
         return children;
     }
+
+    /// <summary>
+    /// Whether <paramref name="outline"/> is OneMore's tag bank. Only the marker's name counts, because
+    /// that's all OneMore checks: a marker with a blank value still gets the block deleted.
+    /// </summary>
+    /// <param name="outline">The <c>one:Outline</c> to check</param>
+    /// <returns>True if the outline carries OneMore's tag-bank marker</returns>
+    private static bool IsTagBank(XElement outline) =>
+        outline.Elements(OneNoteSchema.Meta)
+            .Any(meta => (string?)meta.Attribute("name") == OneNoteSchema.TagBankMetaName);
 
     private static IEnumerable<XElement> BuildParagraphs(string text, AppendFormat format)
     {

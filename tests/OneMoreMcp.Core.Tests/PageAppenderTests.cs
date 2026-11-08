@@ -5,7 +5,7 @@ namespace OneMoreMcp.Core.Tests;
 
 /// <summary>
 /// Covers the append engine: existing content is preserved and exactly the new paragraphs are added,
-/// across the page-with-outline, page-without-outline, and error cases.
+/// across the page-with-outline, page-without-outline, tag-bank, and error cases.
 /// </summary>
 public class PageAppenderTests
 {
@@ -26,11 +26,34 @@ public class PageAppenderTests
         "<one:Title><one:OE><one:T><![CDATA[Bare]]></one:T></one:OE></one:Title>" +
         "</one:Page>";
 
+    private const string BodyOutline =
+        "<one:Outline><one:OEChildren>" +
+        "<one:OE><one:T><![CDATA[Existing line]]></one:T></one:OE>" +
+        "</one:OEChildren></one:Outline>";
+
+    private static string TagBankOutline(string markerValue = "1") =>
+        $"<one:Outline><one:Meta name=\"omTaggingBank\" content=\"{markerValue}\" /><one:OEChildren>" +
+        "<one:OE><one:T><![CDATA[#todo]]></one:T></one:OE>" +
+        "</one:OEChildren></one:Outline>";
+
+    private static string PageWith(params string[] outlines) =>
+        "<?xml version=\"1.0\"?>" +
+        "<one:Page xmlns:one=\"http://schemas.microsoft.com/office/onenote/2013/onenote\" ID=\"{P3}\">" +
+        "<one:Title><one:OE><one:T><![CDATA[Tagged]]></one:T></one:OE></one:Title>" +
+        string.Concat(outlines) +
+        "</one:Page>";
+
     private static List<string> Runs(string xml) =>
         XDocument.Parse(xml)
             .Descendants(One + "Outline")
             .Descendants(One + "T")
             .Select(t => t.Value)
+            .ToList();
+
+    private static List<List<string>> RunsByOutline(string xml) =>
+        XDocument.Parse(xml)
+            .Descendants(One + "Outline")
+            .Select(outline => outline.Descendants(One + "T").Select(t => t.Value).ToList())
             .ToList();
 
     [Fact]
@@ -86,7 +109,53 @@ public class PageAppenderTests
             () => PageAppender.Append(PageNoOutline, "first content", AppendFormat.Plain));
 
         Assert.Contains("no outline", ex.Message);
+        Assert.Contains("typing a line", ex.Message);
+        Assert.DoesNotContain("AddHashtag", ex.Message); // text in a tag bank isn't safe, so don't send people there
         Assert.DoesNotContain("Parameter", ex.Message); // this message reaches the client as-is
+    }
+
+    [Fact]
+    public void Append_goes_into_the_body_when_the_tag_bank_comes_first()
+    {
+        // This is where OneMore puts a new bank: straight after the title.
+        var result = PageAppender.Append(PageWith(TagBankOutline(), BodyOutline), "New line", AppendFormat.Plain);
+
+        var outlines = RunsByOutline(result);
+        Assert.Equal(new[] { "#todo" }, outlines[0]);
+        Assert.Equal(new[] { "Existing line", "New line" }, outlines[1]);
+    }
+
+    [Fact]
+    public void Append_skips_a_tag_bank_that_comes_last()
+    {
+        var result = PageAppender.Append(PageWith(BodyOutline, TagBankOutline()), "New line", AppendFormat.Plain);
+
+        var outlines = RunsByOutline(result);
+        Assert.Equal(new[] { "Existing line", "New line" }, outlines[0]);
+        Assert.Equal(new[] { "#todo" }, outlines[1]);
+    }
+
+    [Theory]
+    [InlineData("1")]
+    [InlineData("")] // OneMore only checks the marker's name, so a blank value is still a bank
+    public void Append_to_a_page_whose_only_outline_is_a_tag_bank_is_refused(string markerValue)
+    {
+        var ex = Assert.Throws<ArgumentException>(
+            () => PageAppender.Append(PageWith(TagBankOutline(markerValue)), "note", AppendFormat.Plain));
+
+        Assert.Contains("tag bank", ex.Message);
+        Assert.Contains("typing a line", ex.Message);
+        Assert.DoesNotContain("Parameter", ex.Message); // this message reaches the client as-is
+    }
+
+    [Fact]
+    public void An_outline_with_some_other_meta_still_takes_text()
+    {
+        var outline = TagBankOutline().Replace("omTaggingBank", "omSomethingElse");
+
+        var result = PageAppender.Append(PageWith(outline), "New line", AppendFormat.Plain);
+
+        Assert.Equal(new[] { "#todo", "New line" }, Runs(result));
     }
 
     [Fact]

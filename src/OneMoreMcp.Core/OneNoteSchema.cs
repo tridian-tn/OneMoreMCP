@@ -19,4 +19,8 @@ public static class OneNoteSchema
     public static XName T => Ns + "T";
     public static XName Position => Ns + "Position";
     public static XName Size => Ns + "Size";
+    public static XName Meta => Ns + "Meta";
+
+    /// <summary>The name of the <c>one:Meta</c> OneMore puts on the outline holding a page's hashtags.</summary>
+    public const string TagBankMetaName = "omTaggingBank";
 }

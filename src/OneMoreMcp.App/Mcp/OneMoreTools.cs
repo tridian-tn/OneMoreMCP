@@ -135,7 +135,8 @@ public sealed class OneMoreTools
     [Description("Append text to the end of a OneNote page WITHOUT sending the page's existing content to the model. "
         + "The server fetches the page locally, adds your text as new paragraph(s), and writes it back — it can only add, "
         + "never overwrite. Always available (independent of the write gate). Requires notebook + section + page. "
-        + "Refuses a page with no body yet (title only), since OneNote won't accept new body content on one.")]
+        + "Refuses a page with no body yet (title only, or title and hashtags), since OneNote won't accept new "
+        + "body content on one. Someone has to type a line in the page in OneNote first.")]
     public async Task<string> AppendToPage(
         [Description("The text to append. One paragraph per line.")] string text,
         [Description("Notebook name.")] string notebook,
@@ -151,10 +152,10 @@ public sealed class OneMoreTools
         // "before" snapshot PutPageXml uses to verify the write actually took effect.
         var pageXml = await ReadPageXml(notebook, section, page, current: false, cancellationToken);
 
-        // 2. Insert the new text, preserving everything else. This refuses a page with no outline before
-        // anything's written, since OneNote would discard the content. PageAppender lives in the pure Core
-        // project and throws plain ArgumentException; translate to McpException so the message
-        // reaches the client instead of being replaced with a generic one.
+        // 2. Insert the new text, preserving everything else. This refuses a page with no body outline before
+        // anything's written: OneNote would discard a new outline, and text in a tag bank wouldn't be safe.
+        // PageAppender lives in the pure Core project and throws plain ArgumentException; translate to
+        // McpException so the message reaches the client instead of being replaced with a generic one.
         string updated;
         try { updated = PageAppender.Append(pageXml, text, ParseAppendFormat(format)); }
         catch (ArgumentException ex) { throw new McpException(ex.Message, ex); }
@@ -239,7 +240,9 @@ public sealed class OneMoreTools
     }
 
     [McpServerTool(Name = "add_hashtag")]
-    [Description("Add one or more hashtags to pages in a notebook (optionally scoped to a section/page). Requires writes to be enabled.")]
+    [Description("Add one or more hashtags to pages in a notebook (optionally scoped to a section/page). "
+        + "Without a page name, it tags every page in the section or notebook. Hashtags don't give an empty page a body: "
+        + "append_to_page still refuses a page that only has hashtags. Requires writes to be enabled.")]
     public async Task<string> AddHashtag(
         [Description("Space-separated tags, e.g. '#todo #review'.")] string tags,
         [Description("Notebook name to act on.")] string notebook,
@@ -253,7 +256,9 @@ public sealed class OneMoreTools
     }
 
     [McpServerTool(Name = "remove_hashtag")]
-    [Description("Remove one or more hashtags from pages in a notebook (optionally scoped to a section/page). Requires writes to be enabled.")]
+    [Description("Remove one or more hashtags from pages in a notebook (optionally scoped to a section/page). "
+        + "WARNING: removing a page's last hashtag deletes OneMore's whole tag-bank block, including any other "
+        + "text in it, and this tool can't tell you it did. Requires writes to be enabled.")]
     public async Task<string> RemoveHashtag(
         [Description("Space-separated tags to remove.")] string tags,
         [Description("Notebook name to act on.")] string notebook,
@@ -637,8 +642,8 @@ public sealed class OneMoreTools
                         $"PutPage reported success for '{notebook}/{section}/{page}', but the page is unchanged after " +
                         "writing — the write did not take effect. Likely causes: a dialog open in OneNote, which blocks " +
                         "writes (close it and retry); a OneDrive sync conflict reverting the change afterwards (check " +
-                        "the notebook's sync status and retry); or a new outline added to a page that has none, which " +
-                        "OneNote ignores (the page needs body text first).");
+                        "the notebook's sync status and retry); or a new outline added to a page with no body yet, " +
+                        "which OneNote ignores (the page needs body text first).");
                 }
             }
         }

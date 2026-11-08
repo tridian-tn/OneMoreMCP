@@ -90,8 +90,8 @@ public class OneMoreCommandTests
     public void Cleanup_scopes_to_notebook_section_page()
     {
         Assert.Equal(
-            new[] { "RemoveEmpty", "--notebook", "Work", "--section", "Ideas" },
-            OneMoreCommand.Cleanup("RemoveEmpty", "Work", "Ideas").Build());
+            new[] { "AdjustBlankLines", "--notebook", "Work", "--section", "Ideas" },
+            OneMoreCommand.Cleanup("AdjustBlankLines", "Work", "Ideas").Build());
     }
 
     [Fact]

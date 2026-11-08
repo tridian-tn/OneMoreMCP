@@ -31,7 +31,7 @@ against `OneMoreCli.exe` directly; **guard them, and flag any change that reintr
   (7.2.0 briefly required `--flag yes`; that's gone.)
 - **Supply every REQUIRED parameter.** `GetPage`/`PutPage` need `--notebook` + `--section` + `--page`
   (unless `--current`); `Search`/`AddHashtag`/`RemoveHashtag`, `Archive`, and **every
-  `run_cleanup` verb** (ApplyStyles/RemoveEmpty/Trim/Embed/…) need `--notebook`. A missing required
+  `run_cleanup` verb** (ApplyStyles/AdjustBlankLines/Trim/Embed/…) need `--notebook`. A missing required
   parameter makes the CLI drop into an **interactive prompt that re-prompts forever** with no console,
   emitting unbounded output. `OneMoreCliRunner` guards this (closes child stdin, caps captured output,
   kills on overflow) — do not remove that guard, and keep command factories complete.

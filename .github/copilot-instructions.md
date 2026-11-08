@@ -51,6 +51,11 @@ against `OneMoreCli.exe` directly; **guard them, and flag any change that reintr
 - **Known upstream limitation:** OneMore content-writes (`UpdatePageContent`) currently don't persist —
   tracked as stevencohn/OneMore#2322. Don't attempt to "fix" this in the wrapper; it's external. The
   write tools stay in place to work once it's resolved.
+- **`SearchTitles` fails through OneMore's add-in.** The CLI relays it as `SearchTitlesCommand`, but the
+  class is `SearchTitleCommand`, so the add-in answers `Unknown command`; it only works when the CLI runs
+  it in-process. `search_titles` catches exactly that error and matches titles locally (`TitleSearch`).
+  Keep the catch that narrow so other `SearchTitles` failures still surface, and keep the local notebook
+  filter a case-insensitive substring match, because that's what `SearchTitles` does.
 
 ## Host and safety conventions
 

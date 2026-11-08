@@ -60,6 +60,9 @@ against `OneMoreCli.exe` directly; **guard them, and flag any change that reintr
   `omTaggingBank`, and `RemoveHashtag` deletes that whole outline when its last hashtag goes, whatever else
   is in it. `PageAppender` skips the bank and refuses a page whose only outline is the bank. OneNote won't
   remove the marker and OneMore only checks its name, so match on the name, not its value.
+- **Don't choose an outline by XML order or `z`.** OneNote changes both for the outline it's just written
+  to, so two outlines take turns from one write to the next. `PageAppender` takes the body outline that ends
+  lowest (`Position` `y` plus `Size` `height`) and breaks ties on `objectID`, which doesn't change.
 
 ## Host and safety conventions
 

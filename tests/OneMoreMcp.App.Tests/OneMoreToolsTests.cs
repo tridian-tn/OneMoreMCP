@@ -355,6 +355,7 @@ public class OneMoreToolsTests
         var ex = await Assert.ThrowsAsync<McpException>(
             () => tools.AppendToPage("note", notebook: "N", section: "S", page: "P", format: "plain"));
         Assert.Contains("unchanged", ex.Message);
+        Assert.Contains("dialog open in OneNote", ex.Message); // the CLI's own output never shows this cause
     }
 
     [Fact]

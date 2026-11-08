@@ -281,6 +281,10 @@ So the write tools read the page back and compare it with what was there before.
 rather than raw XML, because OneNote moves `lastModifiedTime` even for a write it discards. That
 attribute, `selected`, `isCurrentlyViewed` and `omHash` (a hash that covers the others) are all ignored.
 
+A dialog open in OneNote blocks writes the same silent way, even one as harmless as About. The CLI logs
+`80042030` to `%TEMP%\OneMore.log`, retries, gives up, and still exits 0 with no output, so the read-back
+failure is the only sign of it in a tool result.
+
 ## Appending vs. writing
 
 There are two ways to change a page, with deliberately different safety models:

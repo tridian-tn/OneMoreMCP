@@ -531,9 +531,10 @@ public sealed class OneMoreTools
                 {
                     throw new McpException(
                         $"PutPage reported success for '{notebook}/{section}/{page}', but the page is unchanged after " +
-                        "writing — the write did not take effect. A OneDrive sync conflict reverting the change " +
-                        "afterwards is a likely cause; check the notebook's sync status and retry. OneNote also " +
-                        "ignores a new outline added to a page that has none, so a page like that needs body text first.");
+                        "writing — the write did not take effect. Likely causes: a dialog open in OneNote, which blocks " +
+                        "writes (close it and retry); a OneDrive sync conflict reverting the change afterwards (check " +
+                        "the notebook's sync status and retry); or a new outline added to a page that has none, which " +
+                        "OneNote ignores (the page needs body text first).");
                 }
             }
         }

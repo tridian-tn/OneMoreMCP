@@ -270,8 +270,8 @@ pages behind, so `update_page` checks its target exists before writing rather th
 but text kept there isn't safe: removing the page's last hashtag deletes the whole block, along with
 any text in it. OneNote won't drop the block's `omTaggingBank` marker, and it ignores a second outline
 added alongside it, so the block can't be turned into ordinary body text. `append_to_page` therefore
-never writes into a tag bank. It uses the page's last other outline, and refuses a page whose only
-outline is the bank. `update_page` writes whatever XML it's given, so it can still put text there.
+never writes into a tag bank, and refuses a page whose only outline is the bank. `update_page` writes
+whatever XML it's given, so it can still put text there.
 
 Two faults in OneMore's own source explain the silence
 ([`PutPageCommand.cs`](https://github.com/stevencohn/OneMore/blob/main/OneMore/Cli/Commands/PutPageCommand.cs)):
@@ -322,6 +322,13 @@ There are two ways to change a page, with deliberately different safety models:
   `update_page` (which *overwrites* a page), `create_page`, `add_hashtag`/`remove_hashtag`,
   `export`, and `run_cleanup`. Enable them by setting `"AllowWrites": true` in the config. Gated
   tools return a clear "writes are disabled" error until you do.
+
+**Where appended text goes.** A page can have several outlines, so `append_to_page` picks the one that
+ends lowest on the page (`Position` `y` plus `Size` `height`), leaving out any tag bank. Writing only
+makes that outline taller, so repeated appends stay in it until someone moves or adds a block. Outlines
+in exactly the same spot at the same size go by `objectID`, and an outline with no readable `Position`
+is only picked if none of them has one. XML order and `z` can't decide this: OneNote changes both for the
+outline it's just written to, so going by XML order, two outlines take turns.
 
 > [!IMPORTANT]
 > **Requires OneMore 7.3.0 or newer** (the release that fixed [#2322][2322] via [#2323][2323] +

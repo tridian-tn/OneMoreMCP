@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -21,7 +22,7 @@ public enum AppendFormat
 
 /// <summary>
 /// Appends text to a OneNote page by editing the page's XML: it inserts new <c>one:OE</c> paragraphs
-/// into the last body outline's <c>one:OEChildren</c> and leaves everything else untouched. This is the
+/// into the lowest body outline's <c>one:OEChildren</c> and leaves everything else untouched. This is the
 /// engine behind the ungated <c>append_to_page</c> tool — the page's existing content is fetched,
 /// mutated locally, and written back, so it never becomes LLM tokens and can never be overwritten,
 /// only added to.
@@ -69,16 +70,26 @@ public static partial class PageAppender
     }
 
     /// <summary>
-    /// Finds the <c>one:OEChildren</c> to append into: the last body outline's last child container,
+    /// Finds the <c>one:OEChildren</c> to append into: the lowest body outline's last child container,
     /// created if that outline has none. OneMore's tag bank isn't a body outline, because OneMore deletes
     /// the whole block when the page's last hashtag is removed, whatever else is in it. A page with no
     /// body outline is refused rather than given one, because OneNote ignores a new top-level outline: it
     /// takes the write, moves the page's <c>lastModifiedTime</c>, and discards the content.
     /// </summary>
+    /// <remarks>
+    /// Neither XML order nor <c>z</c> can choose the outline: OneNote changes both for the outline it's just
+    /// written to, so two outlines would take turns. Outlines in exactly the same spot have no real "lowest",
+    /// so they fall back to <c>objectID</c>, which is arbitrary but doesn't change between writes. If there's
+    /// nothing else to go on, the stable sort leaves them in XML order and the last one wins.
+    /// </remarks>
     private static XElement AppendTarget(XElement page)
     {
         var outlines = page.Elements(OneNoteSchema.Outline).ToList();
-        var outline = outlines.LastOrDefault(o => !IsTagBank(o));
+        var outline = outlines
+            .Where(o => !IsTagBank(o))
+            .OrderBy(BottomEdge)
+            .ThenBy(o => (string?)o.Attribute("objectID"), StringComparer.Ordinal)
+            .LastOrDefault();
 
         // No paramName: ArgumentException would add it to the message, and this one reaches the client.
         if (outline is null) throw new ArgumentException(outlines.Count == 0 ? NoOutlineMessage : OnlyTagBankMessage);
@@ -101,6 +112,30 @@ public static partial class PageAppender
     private static bool IsTagBank(XElement outline) =>
         outline.Elements(OneNoteSchema.Meta)
             .Any(meta => (string?)meta.Attribute("name") == OneNoteSchema.TagBankMetaName);
+
+    /// <summary>
+    /// Where <paramref name="outline"/> ends on the page. A write only makes the outline it lands in taller,
+    /// so the one that ends lowest stays lowest from one append to the next. An outline with no size counts
+    /// as ending where it starts, and one with no usable position sorts below every outline that has one.
+    /// </summary>
+    /// <param name="outline">The <c>one:Outline</c> to measure</param>
+    /// <returns>The outline's bottom edge, or null if its position is missing or unreadable</returns>
+    private static double? BottomEdge(XElement outline)
+    {
+        var top = ReadNumber(outline.Element(OneNoteSchema.Position), "y");
+        if (top is null) return null;
+
+        return top + (ReadNumber(outline.Element(OneNoteSchema.Size), "height") ?? 0);
+    }
+
+    /// <summary>Reads a numeric attribute as XML writes it, whatever the machine's culture is.</summary>
+    /// <param name="element">The element holding the attribute, if there is one</param>
+    /// <param name="attribute">The attribute's name</param>
+    /// <returns>The attribute's value, or null if it's missing or isn't a number</returns>
+    private static double? ReadNumber(XElement? element, string attribute) =>
+        double.TryParse((string?)element?.Attribute(attribute), NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
+            ? value
+            : null;
 
     private static IEnumerable<XElement> BuildParagraphs(string text, AppendFormat format)
     {

@@ -23,12 +23,13 @@ public static class PageXmlComparer
     };
 
     /// <summary>
-    /// Checks whether two page documents hold the same content, ignoring volatile attributes and the
-    /// whitespace that only formats the XML. Text that can't be parsed only matches an identical string.
+    /// Checks whether two page documents hold the same content, ignoring volatile attributes and how the
+    /// XML happens to be written: formatting whitespace, CDATA versus plain text, and namespace prefixes.
+    /// Text that can't be parsed only matches an identical string.
     /// </summary>
     /// <param name="first">One copy of the page XML</param>
     /// <param name="second">The copy to compare it with</param>
-    /// <returns>True if nothing but volatile attributes or formatting differs</returns>
+    /// <returns>True if nothing but volatile attributes or the way the XML's written differs</returns>
     public static bool HasSameContent(string first, string second)
     {
         if (string.Equals(first, second, StringComparison.Ordinal)) return true;
@@ -38,16 +39,23 @@ public static class PageXmlComparer
         return firstContent is not null && secondContent is not null && XNode.DeepEquals(firstContent, secondContent);
     }
 
-    /// <summary>Parses page XML and removes its volatile attributes.</summary>
+    /// <summary>Parses page XML and reduces it to what can differ between copies of different content.</summary>
     /// <param name="xml">The page XML</param>
-    /// <returns>The document without volatile attributes, or null if the text isn't XML</returns>
+    /// <returns>The reduced document, or null if the text isn't XML</returns>
     private static XDocument? ParseContent(string xml)
     {
         XDocument doc;
         try { doc = XDocument.Parse(xml); }
         catch (XmlException) { return null; }
 
-        doc.Descendants().Attributes().Where(a => VolatileAttributes.Contains(a.Name.LocalName)).Remove();
+        // Dropping namespace declarations only loses the prefixes, since every name keeps its namespace.
+        doc.Descendants().Attributes()
+            .Where(a => a.IsNamespaceDeclaration || VolatileAttributes.Contains(a.Name.LocalName))
+            .Remove();
+
+        // XNode.DeepEquals treats CDATA and plain text holding the same characters as different.
+        foreach (var cdata in doc.DescendantNodes().OfType<XCData>().ToList()) cdata.ReplaceWith(new XText(cdata.Value));
+
         return doc;
     }
 }

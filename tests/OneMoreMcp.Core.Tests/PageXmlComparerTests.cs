@@ -61,6 +61,58 @@ public class PageXmlComparerTests
         Assert.True(PageXmlComparer.HasSameContent(SamplePage, indented));
     }
 
+    [Theory]
+    [InlineData("<![CDATA[Existing line]]>", "Existing line")]
+    [InlineData("<![CDATA[Existing line]]>", "<![CDATA[Existing]]> line")] // split across nodes
+    public void Cdata_and_plain_text_with_the_same_characters_match(string find, string replacement)
+    {
+        Assert.True(PageXmlComparer.HasSameContent(SamplePage, Edited(find, replacement)));
+    }
+
+    [Fact]
+    public void An_empty_cdata_section_matches_an_empty_element()
+    {
+        var empty = Edited("<![CDATA[Existing line]]>", "<![CDATA[]]>");
+        Assert.True(PageXmlComparer.HasSameContent(empty, empty.Replace("<![CDATA[]]>", "")));
+    }
+
+    [Fact]
+    public void Text_is_compared_after_decoding()
+    {
+        // In CDATA "&lt;" is four literal characters; as plain text it's one "<".
+        var escaped = Edited("Existing line]]>", "a < b]]>");
+        Assert.True(PageXmlComparer.HasSameContent(escaped, escaped.Replace("<![CDATA[a < b]]>", "a &lt; b")));
+        Assert.False(PageXmlComparer.HasSameContent(escaped, escaped.Replace("<![CDATA[a < b]]>", "<![CDATA[a &lt; b]]>")));
+    }
+
+    [Fact]
+    public void A_different_namespace_prefix_matches()
+    {
+        var prefixed = SamplePage.Replace("one:", "x:").Replace("xmlns:one=", "xmlns:x=");
+        Assert.True(PageXmlComparer.HasSameContent(SamplePage, prefixed));
+    }
+
+    [Fact]
+    public void A_default_namespace_matches()
+    {
+        var unprefixed = SamplePage.Replace("one:", "").Replace("xmlns:one=", "xmlns=");
+        Assert.True(PageXmlComparer.HasSameContent(SamplePage, unprefixed));
+    }
+
+    [Fact]
+    public void An_extra_namespace_declaration_matches()
+    {
+        var extra = Edited("xmlns:one=", "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:one=");
+        Assert.True(PageXmlComparer.HasSameContent(SamplePage, extra));
+    }
+
+    [Fact]
+    public void A_different_namespace_is_a_real_change()
+    {
+        // The declarations can be ignored because each name keeps its namespace, so this must still differ.
+        Assert.False(PageXmlComparer.HasSameContent(SamplePage, Edited("2013/onenote", "2010/onenote")));
+    }
+
     [Fact]
     public void Identical_text_matches_even_when_it_is_not_xml()
     {

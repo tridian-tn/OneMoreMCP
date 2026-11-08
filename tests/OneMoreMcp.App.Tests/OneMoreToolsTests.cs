@@ -420,6 +420,33 @@ public class OneMoreToolsTests
     }
 
     [Fact]
+    public async Task Update_page_accepts_unchanged_content_sent_as_plain_text()
+    {
+        var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
+        runner.InitialPageXml = PageModifiedAt("2026-11-08T15:31:36.000Z");
+        runner.ReadBackAfterWrite = PageModifiedAt("2026-11-08T15:32:10.000Z");
+
+        var result = await tools.UpdatePage(
+            SamplePageXml.Replace("<![CDATA[Existing]]>", "Existing"), notebook: "N", section: "S", page: "P");
+
+        Assert.Equal("Page updated.", result);
+    }
+
+    [Fact]
+    public async Task Update_page_accepts_unchanged_content_sent_with_an_extra_namespace_declaration()
+    {
+        var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
+        runner.InitialPageXml = PageModifiedAt("2026-11-08T15:31:36.000Z");
+        runner.ReadBackAfterWrite = PageModifiedAt("2026-11-08T15:32:10.000Z");
+
+        var result = await tools.UpdatePage(
+            SamplePageXml.Replace("xmlns:one=", "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:one="),
+            notebook: "N", section: "S", page: "P");
+
+        Assert.Equal("Page updated.", result);
+    }
+
+    [Fact]
     public async Task Update_page_surfaces_a_read_failure_rather_than_calling_it_a_missing_page()
     {
         // A CLI fault while checking the target must not be relabelled "create the page first".

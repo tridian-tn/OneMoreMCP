@@ -488,10 +488,20 @@ public class OneMoreToolsTests
     public async Task Run_cleanup_scopes_to_notebook_and_maps_the_operation()
     {
         var (tools, runner) = Build(allowWrites: true);
-        await tools.RunCleanup("removeEmpty", notebook: "N", section: "S");
+        await tools.RunCleanup("adjustBlankLines", notebook: "N", section: "S");
 
-        var argv = runner.Commands.Single(c => c.Name == "RemoveEmpty").Build();
-        Assert.Equal(new[] { "RemoveEmpty", "--notebook", "N", "--section", "S" }, argv);
+        var argv = runner.Commands.Single(c => c.Name == "AdjustBlankLines").Build();
+        Assert.Equal(new[] { "AdjustBlankLines", "--notebook", "N", "--section", "S" }, argv);
+    }
+
+    [Fact]
+    public async Task Run_cleanup_maps_removeEmpty_to_AdjustBlankLines()
+    {
+        // OneMore 8.0.0 dropped the RemoveEmpty command, so the old operation name has to send the new one.
+        var (tools, runner) = Build(allowWrites: true);
+        await tools.RunCleanup("removeEmpty", notebook: "N");
+
+        Assert.Equal("AdjustBlankLines", runner.Commands.Single().Name);
     }
 
     [Fact]

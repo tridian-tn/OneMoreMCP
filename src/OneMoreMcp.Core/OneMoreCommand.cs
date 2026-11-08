@@ -118,7 +118,7 @@ public sealed class OneMoreCommand
 
     /// <summary>
     /// A page-maintenance command scoped to a notebook (section/page optional). These commands
-    /// (ApplyStyles, RemoveEmpty, Trim, Embed, …) require <c>--notebook</c> in 7.3.0.
+    /// (ApplyStyles, AdjustBlankLines, Trim, Embed, …) require <c>--notebook</c> in 7.3.0+.
     /// </summary>
     public static OneMoreCommand Cleanup(string name, string? notebook, string? section = null, string? page = null) =>
         new OneMoreCommand(name).Option("notebook", notebook).Option("section", section).Option("page", page);

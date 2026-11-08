@@ -236,7 +236,7 @@ OneMoreMcp.exe --disable-autostart
 | `archive` | Archive a notebook (or section) to a `.zip`; confined to `ExportRoot` if set. | gated |
 | `goto` | Navigate OneNote to a page/object. | — |
 | `diagnostics` | Dump OneNote/OneMore diagnostic info (connectivity, versions, paths). | — |
-| `run_cleanup` | Page maintenance on a notebook (`applyStyles`, `removeEmpty`, `trim`, `recalculate`, `enableSpellCheck`/`disableSpellCheck`, `embed`, …) via an `operation` argument. | gated |
+| `run_cleanup` | Page maintenance on a notebook (`applyStyles`, `adjustBlankLines`, `trim`, `recalculate`, `enableSpellCheck`/`disableSpellCheck`, `embed`, …) via an `operation` argument. | gated |
 
 ## Reading & output formats
 
@@ -294,6 +294,10 @@ There are two ways to change a page, with deliberately different safety models:
 > attributes intact, and uses bare-switch booleans — all as of 7.3.0. On 7.2.0 or earlier the read
 > commands fail. Content-writes (`append_to_page`, `update_page`, hashtags,
 > `run_cleanup`) are **verified working on 7.3.0** (append round-trips and persists).
+>
+> `run_cleanup`'s `adjustBlankLines` operation needs **OneMore 8.0.0 or newer**: 8.0.0 renamed the
+> CLI's `RemoveEmpty` command to `AdjustBlankLines`. The old `removeEmpty` operation name still works
+> and sends the new command.
 >
 > [2322]: https://github.com/stevencohn/OneMore/issues/2322
 > [2323]: https://github.com/stevencohn/OneMore/pull/2323
@@ -381,7 +385,7 @@ The server is a **process orchestrator**: each tool builds a `OneMoreCli.exe` in
 | `archive` | `Archive --notebook --outfile [--section]` |
 | `goto` | `Goto --pageId [--objectId]` |
 | `diagnostics` | `Diagnostics [--windows]` |
-| `run_cleanup` | `<op> --notebook [--section] [--page]` — ApplyStyles / RemoveEmpty / Trim / Embed --refresh / … (all require `--notebook`) |
+| `run_cleanup` | `<op> --notebook [--section] [--page]` — ApplyStyles / AdjustBlankLines / Trim / Embed --refresh / … (all require `--notebook`) |
 
 > `PutPage --force` overwrites the page identified by the `ID` carried in the supplied XML. The exact
 > targeting of `--section`/`--page` may need tuning against your OneMore version — see the tool

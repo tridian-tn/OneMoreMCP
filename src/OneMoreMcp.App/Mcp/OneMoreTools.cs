@@ -273,8 +273,8 @@ public sealed class OneMoreTools
 
     [McpServerTool(Name = "run_cleanup")]
     [Description("Run a page-maintenance operation on a notebook (optionally scoped to a section/page). Requires writes to be enabled. "
-        + "operation: applyStyles, clearBackground, removeEmpty, trim, recalculate, removeAuthors, removeInk, removeCitations, "
-        + "removeTags, restoreAutosize, enableSpellCheck, disableSpellCheck, embed.")]
+        + "operation: applyStyles, clearBackground, adjustBlankLines (formerly removeEmpty), trim, recalculate, removeAuthors, "
+        + "removeInk, removeCitations, removeTags, restoreAutosize, enableSpellCheck, disableSpellCheck, embed.")]
     public async Task<string> RunCleanup(
         [Description("The maintenance operation to run (see the list in this tool's description).")] string operation,
         [Description("Notebook to act on.")] string notebook,
@@ -586,7 +586,9 @@ public sealed class OneMoreTools
         {
             "applystyles" => "ApplyStyles",
             "clearbackground" => "ClearBackground",
-            "removeempty" => "RemoveEmpty",
+            // OneMore 8.0.0 renamed RemoveEmpty to AdjustBlankLines; the old name stays as an alias
+            // so callers that still say removeEmpty keep working.
+            "adjustblanklines" or "removeempty" => "AdjustBlankLines",
             "trim" => "Trim",
             "recalculate" => "Recalculate",
             "removeauthors" => "RemoveAuthors",
@@ -598,7 +600,7 @@ public sealed class OneMoreTools
             "disablespellcheck" => "DisableSpellCheck",
             "embed" => "Embed",
             _ => throw new McpException(
-                $"Unknown cleanup operation '{operation}'. Valid: applyStyles, clearBackground, removeEmpty, trim, " +
+                $"Unknown cleanup operation '{operation}'. Valid: applyStyles, clearBackground, adjustBlankLines, trim, " +
                 "recalculate, removeAuthors, removeInk, removeCitations, removeTags, restoreAutosize, " +
                 "enableSpellCheck, disableSpellCheck, embed."),
         };

@@ -28,8 +28,9 @@ public static partial class TitleSearch
     /// </summary>
     /// <param name="hierarchyXml">GetHierarchy output without <c>--section</c></param>
     /// <param name="notebookFilter">
-    /// Keeps notebooks whose name contains this, ignoring case, as OneMore's SearchTitles does (so "Work"
-    /// also picks "WorkArchive"). Null, blank or <c>*</c> keeps them all
+    /// Picks notebooks the way OneMore's SearchTitles does: <c>\</c> for the one open in OneNote, otherwise
+    /// those whose name contains this, ignoring case (so "Work" also picks "WorkArchive"). Null, blank or
+    /// <c>*</c> keeps them all
     /// </param>
     /// <returns>The sections in hierarchy order, or null when a filter is given and no notebook matches it</returns>
     /// <exception cref="ArgumentException">The output isn't XML, which means the CLI printed an error</exception>
@@ -53,10 +54,13 @@ public static partial class TitleSearch
         foreach (var notebook in doc.Root!.DescendantsAndSelf(OneNoteSchema.Ns + "Notebook"))
         {
             var name = (string?)notebook.Attribute("name") ?? "";
-            if (filtered && !name.Contains(notebookFilter!, StringComparison.OrdinalIgnoreCase)) continue;
+            // Judged across every notebook, not just the picked ones: --notebook goes to the first of a
+            // name even when that one isn't picked.
+            var reachable = seen.Add(name);
+            if (filtered && !Picks(notebookFilter!, notebook, name)) continue;
 
             matched++;
-            if (!seen.Add(name))
+            if (!reachable)
             {
                 unreachable.Add(name);
                 continue;
@@ -65,6 +69,11 @@ public static partial class TitleSearch
         }
         return filtered && matched == 0 ? null : new SectionList(sections, unreachable);
     }
+
+    private static bool Picks(string filter, XElement notebook, string name) =>
+        filter == @"\"
+            ? (string?)notebook.Attribute("isCurrentlyViewed") == "true"
+            : name.Contains(filter, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Splits a query into the words and quoted phrases a title has to contain. A bare <c>AND</c> is

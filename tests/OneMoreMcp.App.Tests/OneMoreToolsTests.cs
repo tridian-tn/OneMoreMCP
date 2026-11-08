@@ -550,6 +550,35 @@ public class OneMoreToolsTests
     }
 
     [Fact]
+    public async Task Search_titles_local_match_searches_the_open_notebook_for_backslash()
+    {
+        var (tools, runner) = Build();
+        runner.FailWith["SearchTitles"] = SearchTitlesBridgeFailure;
+        runner.HierarchyFor = argv => Section(argv) is null
+            ? "<one:Notebooks xmlns:one=\"http://schemas.microsoft.com/office/onenote/2013/onenote\">" +
+              "<one:Notebook name=\"Work\"><one:Section name=\"Ideas\" /></one:Notebook>" +
+              "<one:Notebook name=\"Home\" isCurrentlyViewed=\"true\"><one:Section name=\"Lists\" /></one:Notebook>" +
+              "</one:Notebooks>"
+            : SectionWithPages("Roadmap");
+
+        var md = await tools.SearchTitles("roadmap", notebook: @"\");
+
+        Assert.Contains("- Home/Lists/Roadmap", md);
+        Assert.DoesNotContain(runner.Commands, c => Section(c.Build()) == "Ideas");
+    }
+
+    [Fact]
+    public async Task Search_titles_local_match_says_so_when_backslash_has_no_open_notebook()
+    {
+        var (tools, runner) = Build();
+        runner.FailWith["SearchTitles"] = SearchTitlesBridgeFailure;
+        runner.HierarchyFor = _ => WorkNotebookXml;
+
+        var ex = await Assert.ThrowsAsync<McpException>(() => tools.SearchTitles("roadmap", notebook: @"\"));
+        Assert.Contains("No notebook is open", ex.Message);
+    }
+
+    [Fact]
     public async Task Search_titles_local_match_reports_an_unknown_notebook()
     {
         var (tools, runner) = Build();

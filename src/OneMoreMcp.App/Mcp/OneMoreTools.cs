@@ -81,7 +81,8 @@ public sealed class OneMoreTools
         + "locally instead (every word or quoted phrase must appear) and the result says so; that's slower on large notebooks.")]
     public async Task<string> SearchTitles(
         [Description("The title query.")] string query,
-        [Description("Notebook to search. Omit to search all loaded notebooks.")] string? notebook = null,
+        [Description("Notebook to search; matches names partially, so 'Work' also searches 'WorkArchive'. '\\' searches "
+            + "the notebook open in OneNote. Omit to search all loaded notebooks.")] string? notebook = null,
         [Description("Output format: 'markdown' (default) or 'xml'.")] string? format = null,
         CancellationToken cancellationToken = default)
     {
@@ -389,7 +390,12 @@ public sealed class OneMoreTools
         TitleSearch.SectionList? list;
         try { list = TitleSearch.ListSections(hierarchy, notebook); }
         catch (ArgumentException ex) { throw new McpException($"OneMore CLI 'GetHierarchy' failed: {ex.Message}", ex); }
-        if (list is null) throw new McpException($"Notebook '{notebook}' was not found.");
+        if (list is null)
+        {
+            throw new McpException(notebook == @"\"
+                ? "No notebook is open in OneNote, so there's no current notebook to search."
+                : $"Notebook '{notebook}' was not found.");
+        }
 
         var pages = new List<XElement>();
         var skipped = 0;

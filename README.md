@@ -288,7 +288,7 @@ same shape, marked `source="local"`, and the markdown says the fallback ran.
 - Every word or quoted phrase has to appear in the title, ignoring case and order. OR, NOT,
   parentheses, wildcards, `>` sorting and `#hashtag` filters aren't supported.
 - The notebook filter matches names partially, as `SearchTitles` does, so `Work` also searches
-  `WorkArchive`. Omitting it searches every open notebook.
+  `WorkArchive`. `\` searches the notebook open in OneNote, and omitting it searches every open notebook.
 - It's slower: one CLI call per section, so roughly 10–30 seconds on large notebooks. A section the CLI
   can't read is skipped, and the result says how many were.
 - The CLI finds a notebook by name, so if two open notebooks share a name, only the first can be

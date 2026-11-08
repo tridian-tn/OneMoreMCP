@@ -107,6 +107,40 @@ public class TitleSearchTests
     }
 
     [Fact]
+    public void ListSections_backslash_picks_the_notebook_open_in_OneNote()
+    {
+        var xml =
+            $"<one:Notebooks xmlns:one=\"{Ns}\">" +
+            "<one:Notebook name=\"Work\"><one:Section name=\"Ideas\" /></one:Notebook>" +
+            "<one:Notebook name=\"Home\" isCurrentlyViewed=\"true\"><one:Section name=\"Lists\" /></one:Notebook>" +
+            "</one:Notebooks>";
+
+        Assert.Equal(new[] { new TitleSearch.SectionRef("Home", "Lists") }, TitleSearch.ListSections(xml, @"\")!.Sections);
+    }
+
+    [Fact]
+    public void ListSections_backslash_is_null_when_no_notebook_is_open()
+    {
+        Assert.Null(TitleSearch.ListSections(TwoNotebooks, @"\"));
+    }
+
+    [Fact]
+    public void ListSections_judges_name_reachability_across_every_notebook_not_just_picked_ones()
+    {
+        // The open notebook is the second "Notes": --notebook Notes would reach the first one instead.
+        var xml =
+            $"<one:Notebooks xmlns:one=\"{Ns}\">" +
+            "<one:Notebook name=\"Notes\" ID=\"{A}\"><one:Section name=\"General\" /></one:Notebook>" +
+            "<one:Notebook name=\"Notes\" ID=\"{B}\" isCurrentlyViewed=\"true\"><one:Section name=\"General\" /></one:Notebook>" +
+            "</one:Notebooks>";
+
+        var list = TitleSearch.ListSections(xml, @"\")!;
+
+        Assert.Empty(list.Sections);
+        Assert.Equal(new[] { "Notes" }, list.UnreachableNotebooks);
+    }
+
+    [Fact]
     public void ListSections_is_empty_for_blank_output_and_throws_for_a_cli_message()
     {
         Assert.Empty(TitleSearch.ListSections("")!.Sections);

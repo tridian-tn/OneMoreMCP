@@ -452,9 +452,11 @@ public sealed class OneMoreTools
     /// verifies the write actually took effect. A clean PutPage exit isn't proof of that — the CLI can
     /// retry past a transient COM error and still exit 0, and on a OneDrive-synced notebook the follow-up
     /// Sync can resolve a conflict in favour of the server copy, silently reverting the local change. The
-    /// page is read back afterwards and compared against a "before" snapshot: a mismatch confirms the
-    /// write; an exact match means it silently no-opped. The target must already exist: PutPage's create
-    /// path is broken and leaves an empty "Untitled" page rather than applying the content.
+    /// page is read back afterwards and its content compared against a "before" snapshot, ignoring
+    /// attributes that move on their own (OneNote bumps <c>lastModifiedTime</c> even for a write it
+    /// discards): a difference confirms the write; no difference means it silently no-opped, unless the
+    /// XML sent was already what's on the page. The target must already exist: PutPage's create path is
+    /// broken and leaves an empty "Untitled" page rather than applying the content.
     /// </summary>
     /// <param name="previousXml">
     /// The page's content before this write, if the caller already fetched it (e.g. append_to_page).
@@ -521,11 +523,18 @@ public sealed class OneMoreTools
                     _log.LogWarning(ex, "Could not read back '{Page}' to verify the write took effect.", page);
                 }
 
-                if (afterXml is not null && afterXml == previousXml)
+                // An unchanged page only means a lost write if the write asked for a change. Re-sending
+                // what's already there leaves nothing to detect.
+                if (afterXml is not null
+                    && !PageXmlComparer.HasSameContent(pageXml, previousXml)
+                    && PageXmlComparer.HasSameContent(afterXml, previousXml))
+                {
                     throw new McpException(
                         $"PutPage reported success for '{notebook}/{section}/{page}', but the page is unchanged after " +
                         "writing — the write did not take effect. A OneDrive sync conflict reverting the change " +
-                        "afterwards is a likely cause; check the notebook's sync status and retry.");
+                        "afterwards is a likely cause; check the notebook's sync status and retry. OneNote also " +
+                        "ignores a new outline added to a page that has none, so a page like that needs body text first.");
+                }
             }
         }
         finally

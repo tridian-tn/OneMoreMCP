@@ -277,6 +277,10 @@ Two faults in OneMore's own source explain the silence
   deliberate "unchanged, skip" optimisation which also means **re-sending a stale copy of a page
   silently does nothing**. Always write back XML you've just read.
 
+So the write tools read the page back and compare it with what was there before. They compare content
+rather than raw XML, because OneNote moves `lastModifiedTime` even for a write it discards. That
+attribute, `selected`, `isCurrentlyViewed` and `omHash` (a hash that covers the others) are all ignored.
+
 ## Appending vs. writing
 
 There are two ways to change a page, with deliberately different safety models:
@@ -380,7 +384,7 @@ The server is a **process orchestrator**: each tool builds a `OneMoreCli.exe` in
 | `search_titles` | `SearchTitles --query [--notebook]` (page paths) |
 | `search_hashtags` | `SearchHashtags --query [--allTags] [--notebook] [--section] [--page]` |
 | `sync` | `Sync --notebook` |
-| `append_to_page` | `GetPage` (raw) → local append → `PutPage --infile <temp> --force` → `Sync` (if `SyncAfterWrite`) |
+| `append_to_page` | `GetPage` (raw) → local append → `PutPage --infile <temp> --force` → `Sync` (if `SyncAfterWrite`) → `GetPage` (verify) |
 | `create_page` | `GetHierarchy` → `PutPage --notebook --section --page --infile` (no `--force`) → `GetHierarchy` → `Goto --pageId` → `GetPage --current` → `PutPage --infile` (no `--page`, targets the embedded ID) |
 | `update_page` | `GetPage` (existence check) → `PutPage --notebook --section --page --infile <temp> --force` → `Sync` (if `SyncAfterWrite`) → `GetPage` (verify) |
 | `add_hashtag` / `remove_hashtag` | `AddHashtag --tags` / `RemoveHashtag --tags` |

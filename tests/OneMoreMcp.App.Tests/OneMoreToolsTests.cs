@@ -21,9 +21,8 @@ public class OneMoreToolsTests
         "<one:OE><one:T><![CDATA[Existing]]></one:T></one:OE>" +
         "</one:OEChildren></one:Outline></one:Page>";
 
-    // Distinct from SamplePageXml (the fake's default "current page" content) so write tests that need a
-    // real before/after difference — for the silent-no-op read-back check — don't false-positive on writing
-    // content that's byte-identical to what's already "on the page".
+    // Distinct from SamplePageXml (the fake's default "current page" content) so a write has something to
+    // change, which is what gives the silent-no-op read-back check something to detect.
     private const string SampleUpdatedPageXml =
         "<?xml version=\"1.0\"?>" +
         "<one:Page xmlns:one=\"http://schemas.microsoft.com/office/onenote/2013/onenote\" ID=\"{P1}\">" +
@@ -37,6 +36,10 @@ public class OneMoreToolsTests
         "<?xml version=\"1.0\"?>" +
         "<one:Page xmlns:one=\"http://schemas.microsoft.com/office/onenote/2013/onenote\" ID=\"{P1}\">" +
         "<one:Title><one:OE><one:T><![CDATA[Title]]></one:T></one:OE></one:Title></one:Page>";
+
+    /// <summary>The sample page as OneNote reports it, stamped with the given modified time.</summary>
+    private static string PageModifiedAt(string lastModifiedTime) =>
+        SamplePageXml.Replace("ID=\"{P1}\"", $"ID=\"{{P1}}\" lastModifiedTime=\"{lastModifiedTime}\"");
 
     private static (OneMoreTools tools, FakeRunner runner) Build(
         bool allowWrites = false, string? exportRoot = null, bool syncAfterWrite = true)
@@ -366,6 +369,57 @@ public class OneMoreToolsTests
     }
 
     [Fact]
+    public async Task Append_to_page_throws_when_the_read_back_differs_only_in_lastModifiedTime()
+    {
+        // OneNote moves lastModifiedTime even for a write it discards, so the page has to be judged on
+        // its content: a moved timestamp alone isn't a write that took effect.
+        var (tools, runner) = Build(syncAfterWrite: false);
+        runner.InitialPageXml = PageModifiedAt("2026-11-08T15:31:36.000Z");
+        runner.ReadBackAfterWrite = PageModifiedAt("2026-11-08T15:32:10.000Z");
+
+        var ex = await Assert.ThrowsAsync<McpException>(
+            () => tools.AppendToPage("note", notebook: "N", section: "S", page: "P", format: "plain"));
+        Assert.Contains("unchanged", ex.Message);
+    }
+
+    [Fact]
+    public async Task Update_page_throws_when_the_read_back_differs_only_in_lastModifiedTime()
+    {
+        var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
+        runner.InitialPageXml = PageModifiedAt("2026-11-08T15:31:36.000Z");
+        runner.ReadBackAfterWrite = PageModifiedAt("2026-11-08T15:32:10.000Z");
+
+        var ex = await Assert.ThrowsAsync<McpException>(
+            () => tools.UpdatePage(SampleUpdatedPageXml, notebook: "N", section: "S", page: "P"));
+        Assert.Contains("unchanged", ex.Message);
+    }
+
+    [Fact]
+    public async Task Append_to_page_succeeds_when_the_content_changes_along_with_lastModifiedTime()
+    {
+        var (tools, runner) = Build(syncAfterWrite: false);
+        runner.InitialPageXml = PageModifiedAt("2026-11-08T15:31:36.000Z");
+        runner.ReadBackAfterWrite = SampleUpdatedPageXml.Replace(
+            "ID=\"{P1}\"", "ID=\"{P1}\" lastModifiedTime=\"2026-11-08T15:32:10.000Z\"");
+
+        Assert.Equal("Appended.", await tools.AppendToPage("note", notebook: "N", section: "S", page: "P", format: "plain"));
+    }
+
+    [Fact]
+    public async Task Update_page_accepts_a_write_of_what_is_already_on_the_page()
+    {
+        // Nothing was asked to change, so an unchanged page isn't a failed write or a sync conflict.
+        var (tools, runner) = Build(allowWrites: true, syncAfterWrite: false);
+        runner.InitialPageXml = PageModifiedAt("2026-11-08T15:31:36.000Z");
+        runner.ReadBackAfterWrite = PageModifiedAt("2026-11-08T15:32:10.000Z");
+
+        var result = await tools.UpdatePage(
+            PageModifiedAt("2026-11-08T15:31:36.000Z"), notebook: "N", section: "S", page: "P");
+
+        Assert.Equal("Page updated.", result);
+    }
+
+    [Fact]
     public async Task Update_page_surfaces_a_read_failure_rather_than_calling_it_a_missing_page()
     {
         // A CLI fault while checking the target must not be relabelled "create the page first".
@@ -622,6 +676,10 @@ public class OneMoreToolsTests
         /// the silent no-op write from issue #10 (e.g. a OneDrive sync reverting the change).</summary>
         public bool SimulateNoOpWrite { get; set; }
 
+        /// <summary>When set, PutPage exits clean but the page then reads back as this rather than what was
+        /// sent — how a page looks when OneNote discards a write and still moves its lastModifiedTime.</summary>
+        public string? ReadBackAfterWrite { get; set; }
+
         /// <summary>When true, GetPage returns nothing — how the real CLI reports a page that doesn't exist
         /// (exit 0, empty output file, no diagnostic on stdout).</summary>
         public bool PageMissing { get; set; }
@@ -662,7 +720,7 @@ public class OneMoreToolsTests
             {
                 var infile = OptionValue(argv, "--infile");
                 if (infile != null) LastInfileXml = File.ReadAllText(infile);
-                if (!SimulateNoOpWrite) PersistedPageXml = LastInfileXml;
+                if (!SimulateNoOpWrite) PersistedPageXml = ReadBackAfterWrite ?? LastInfileXml;
 
                 var named = OptionValue(argv, "--page") != null;
                 var forced = argv.Contains("--force");
